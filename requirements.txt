@@ -1,0 +1,32 @@
+# Core
+flask==2.3.3
+flask-sqlalchemy==3.0.5
+flask-wtf==1.2.1
+wtforms==3.1.0
+flask-sock
+flask-cors==4.0.0
+
+# MCP
+fastmcp>=2.10.4
+
+# ASGI Support
+uvicorn>=0.35.0
+a2wsgi>=1.10.10
+
+# Container Management
+llm-sandbox>=0.3.0
+docker
+
+# External Services
+anthropic
+httpx
+
+# Utilities
+python-dotenv
+bcrypt==4.3.0
+Flask-Login==0.6.3
+tenacity==8.2.3
+
+# OAuth Support
+PyJWT==2.8.0
+cryptography==42.0.5

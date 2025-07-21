@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Project specific
+data/
+instance/
+tests/
+.env
+.env.*
+*.db
+*.sqlite
+*.log
+
+# Development
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Docker
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# Ignore virtual environments
+venv/
+**/__pycache__/
+
+# Ignore local data and databases
+data/
+*.db
+*.db-journal
+
+# Ignore IDE and editor files
+.vscode/
+.idea/
+.project
+.classpath
+
+# Ignore git files
+.git/
+.gitignore
+.gitattributes
+
+# Ignore fly build artifacts
+fly.toml
+Dockerfile
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db 
