@@ -2,38 +2,34 @@
 
 import logging
 from typing import Dict, Any, Optional
-from flask import Flask
+from flask import Flask, Request
 from mcp_router.config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class MCPServerManager:
-    """Provides static information about the MCP server transport mode"""
+    """Manages the overall status and transport of the MCP Router"""
 
-    def __init__(self, app: Optional[Flask] = None):
-        """Initialize the server manager
+    def __init__(self):
+        # Determine the transport mode at initialization
+        self.transport_mode = Config.MCP_TRANSPORT
+
+    def get_status(self, request: Optional[Request] = None) -> Dict[str, Any]:
+        """
+        Get the current status of the MCP Router application.
 
         Args:
-            app: Flask application instance (kept for compatibility)
-        """
-        self.app = app
-
-    def get_status(self) -> Dict[str, Any]:
-        """Get current server status based on the configured transport mode
+            request: The current Flask request object (optional)
 
         Returns:
-            Dict containing status information for the current transport mode
+            A dictionary containing the application status
         """
-        transport = Config.MCP_TRANSPORT.lower()
-
-        # Base status information
         status_info = {
-            "status": "running",
-            "transport": transport,
-            "started_at": None,  # Not applicable in the new architecture
-            "pid": None,  # Not applicable in the new architecture
+            "transport": self.transport_mode,
+            "status": "running",  # If this code is running, the app is running
         }
+        transport = self.transport_mode
 
         if transport == "stdio":
             # For STDIO mode, show command for local clients
@@ -51,8 +47,14 @@ class MCPServerManager:
                 }
             )
         elif transport == "http":
-            # Build connection info for HTTP mode
-            base_url = f"http://{Config.MCP_HOST}:{Config.FLASK_PORT}"
+            # Determine base URL from request if available, otherwise from config
+            if request:
+                scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+                host = request.headers.get("X-Forwarded-Host", request.host)
+                base_url = f"{scheme}://{host}"
+            else:
+                base_url = f"http://{Config.MCP_HOST}:{Config.FLASK_PORT}"
+
             mcp_url = f"{base_url}{Config.MCP_PATH}"
 
             status_info.update(
@@ -119,7 +121,7 @@ def init_server_manager(app: Flask) -> MCPServerManager:
         Initialized MCPServerManager instance
     """
     global server_manager
-    server_manager = MCPServerManager(app)
+    server_manager = MCPServerManager()
     return server_manager
 
 

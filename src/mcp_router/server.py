@@ -1,6 +1,5 @@
 """FastMCP server implementation for MCP Router using proxy pattern"""
 
-import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from fastmcp import FastMCP
@@ -149,6 +148,7 @@ class DynamicServerManager:
             log.error(f"Failed to remove server '{server_name}': {e}")
             raise
     
+    # TODO: This is not used anywhere, remove it?
     def get_providers(self) -> List[Dict[str, str]]:
         """
         Get list of providers with descriptions.
@@ -163,6 +163,7 @@ class DynamicServerManager:
         log.debug(f"Returning {len(providers)} providers")
         return providers
     
+    # TODO: This is not used anywhere, remove it?
     def get_provider_names(self) -> List[str]:
         """
         Get list of provider names only.
@@ -263,15 +264,15 @@ Example workflow:
             log.error(f"Failed to mount server '{server.name}' during initialization: {e}")
             continue
 
-    # Add the built-in Python sandbox tool
+    # Add a built-in Python sandbox tool that uses llm-sandbox
     @router.tool()
     def python_sandbox(code: str, libraries: List[str] = None) -> Dict[str, Any]:
         """
-        Execute Python code in a secure sandbox with data science libraries.
+        Executes Python code in a secure sandbox.
 
         Args:
-            code: Python code to execute
-            libraries: Additional pip packages to install (e.g., ["pandas", "scikit-learn"])
+            code: The Python code to execute.
+            libraries: A list of libraries to install before execution.
 
         Returns:
             A dictionary with stdout, stderr, and exit_code
@@ -291,20 +292,16 @@ Example workflow:
             ) as session:
                 # Install only the additional, non-default libraries
                 if libraries:
-                    default_libs = ["pandas", "numpy", "matplotlib", "seaborn", "scipy"]
-                    additional_libs = [lib for lib in libraries if lib not in default_libs]
-
-                    if additional_libs:
-                        install_cmd = f"pip install --no-cache-dir {' '.join(additional_libs)}"
-                        log.info(f"Installing additional libraries: {install_cmd}")
-                        result = session.execute_command(install_cmd)
-                        if result.exit_code != 0:
-                            log.error(f"Library installation failed: {result.stderr}")
-                            return {
-                                "status": "error",
-                                "message": "Failed to install libraries",
-                                "stderr": result.stderr,
-                            }
+                    install_cmd = f"pip install --no-cache-dir {' '.join(libraries)}"
+                    log.info(f"Installing additional libraries: {install_cmd}")
+                    result = session.execute_command(install_cmd)
+                    if result.exit_code != 0:
+                        log.error(f"Library installation failed: {result.stderr}")
+                        return {
+                            "status": "error",
+                            "message": "Failed to install libraries",
+                            "stderr": result.stderr,
+                        }
 
                 # Execute code
                 log.info("Executing Python code in sandbox")
@@ -329,19 +326,21 @@ Example workflow:
             log.error(f"Sandbox error: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
+
     @router.tool()
     def list_providers() -> List[Dict[str, str]]:
         """
-        List all available MCP server providers with descriptions.
-
-        Returns a list of dictionaries containing provider name and description
-        that can be used with the provider parameter in tools/list and tool calls.
+        Get list of providers with descriptions.
+        
+        Returns:
+            List of dictionaries containing provider name and description
         """
-        if _dynamic_manager:
-            return _dynamic_manager.get_providers()
-        else:
-            log.warning("Dynamic manager not available, returning empty provider list")
-            return []
+        providers = [
+            {"name": name, "description": desc}
+            for name, desc in _dynamic_manager.server_descriptions.items()
+        ]
+        log.debug(f"Returning {len(providers)} providers")
+        return providers
 
     # Add the middleware for hierarchical discovery
     router.add_middleware(ProviderFilterMiddleware())

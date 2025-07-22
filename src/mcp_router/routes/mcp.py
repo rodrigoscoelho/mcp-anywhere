@@ -40,7 +40,7 @@ def get_mcp_status() -> Union[str, Response]:
         HTML template for htmx requests or JSON for API requests
     """
     server_manager = get_server_manager()
-    status = server_manager.get_status()
+    status = server_manager.get_status(request=request)
 
     # Return HTML for htmx requests
     if request.headers.get("HX-Request"):

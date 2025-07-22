@@ -83,9 +83,9 @@ class ContainerManager:
         # Common runtime configuration for resource limits and environment
         runtime_config = {
             "mem_limit": "512m",  # 512MB memory limit
-            "cpu_period": 100000,
-            "cpu_quota": 50000,  # 50% of one CPU
-            "pids_limit": 100,  # Process limit
+            #"cpu_period": 100000,
+            #"cpu_quota": 50000,  # 50% of one CPU
+            #"pids_limit": 100,  # Process limit
             "environment": env_vars,  # Pass environment variables at container level
         }
 
@@ -290,7 +290,9 @@ except Exception as e:
             logger.error(f"Error testing server {server.name}: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
-    def build_python_sandbox_image(self, force: bool = False) -> Dict[str, Any]:
+
+    # TODO: This is not used anywhere, remove it?
+    def build_python_sandbox_image(self) -> Dict[str, Any]:
         """Builds a custom python sandbox image with common libraries pre-installed.
 
         Args:
@@ -308,7 +310,7 @@ except Exception as e:
                 lang="python",
                 image=self.python_image,
                 template_name=self.sandbox_image_template,
-                commit_container=True,  # This is key: saves the state after the session
+                commit_container=True,  
                 docker_host=self.docker_host,
             ) as session:
                 logger.info("Installing common data science libraries into the template...")
@@ -338,6 +340,9 @@ except Exception as e:
             logger.error(f"Error building custom sandbox image: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
+
+
+    # TODO: This is not used anywhere, remove it?
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -387,6 +392,8 @@ except Exception as e:
             logger.error(f"Failed to pull image '{image_name}': {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
+
+    # TODO: This is not used anywhere, remove it?
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -453,6 +460,8 @@ except Exception as e:
             logger.error(f"Error running server {server.name} in sandbox: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
+
+    # TODO: This is not used anywhere, remove it?
     def initialize_templates(self) -> None:
         """Pre-create template containers for faster startup
 
@@ -478,9 +487,9 @@ except Exception as e:
                 with self._create_sandbox_session(server, use_template=True) as sandbox:
                     # Run a simple command to ensure container is ready
                     if server.runtime_type == "npx":
-                        sandbox.run("node --version", timeout=10.0)
+                        sandbox.run("node --version", timeout=60.0)
                     else:
-                        sandbox.run("python --version", timeout=10.0)
+                        sandbox.run("python --version", timeout=60.0)
                 logger.info(f"Template container created for {server.runtime_type}")
             except Exception as e:
                 logger.error(f"Failed to create template for {server.runtime_type}: {e}")
