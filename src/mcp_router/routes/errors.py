@@ -48,3 +48,12 @@ def register_error_handlers(app: Flask) -> None:
             Tuple of (empty string, 204 status code)
         """
         return "", 204
+
+    @app.route("/health")
+    def health() -> Tuple[str, int]:
+        """Health check endpoint for load balancers and monitoring
+
+        Returns:
+            Tuple of (OK string, 200 status code)
+        """
+        return "OK", 200

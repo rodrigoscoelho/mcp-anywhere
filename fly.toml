@@ -15,29 +15,43 @@ kill_timeout = '5s'
   DATABASE_URL = 'sqlite:////data/mcp_router.db'
   DOCKER_HOST = 'unix:///var/run/docker.sock'
   FLASK_PORT = '8000'
+  MCP_HOST = '0.0.0.0'
+  MCP_AUTH_TYPE = 'oauth'
 
 [[mounts]]
   source = 'mcp_router_data'
   destination = '/data'
 
-[[services]]
-  protocol = 'tcp'
+[http_service]
   internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
   processes = ['app']
 
-  [[services.ports]]
+  [[http_service.ports]]
     port = 80
     handlers = ['http']
     force_https = true
 
-  [[services.ports]]
+  [[http_service.ports]]
     port = 443
     handlers = ['tls', 'http']
 
-  [services.concurrency]
+  [http_service.concurrency]
     type = 'connections'
     hard_limit = 25
     soft_limit = 20
+
+  # Health check to ensure the application is responding
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "10s"
+    path = "/health"
+    headers = {}
 
 # Note: MCP server is now mounted at /mcp on the main service (port 8000)
 # No separate service needed due to the new dual transport architecture

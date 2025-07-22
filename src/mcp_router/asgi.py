@@ -3,7 +3,7 @@ from starlette.applications import Starlette
 from a2wsgi import WSGIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import RedirectResponse, JSONResponse
 from mcp_router.app import app as flask_app
 from mcp_router.server import get_http_app
 from mcp_router.config import Config
@@ -49,16 +49,32 @@ def clear_auth_type_cache() -> None:
     auth_type_cache["expires"] = 0
 
 
+class RedirectMiddleware(BaseHTTPMiddleware):
+    """Middleware to redirect /mcp to /mcp/"""
+
+    async def dispatch(self, request: Request, call_next):
+        mcp_path = Config.MCP_PATH
+        if request.url.path == mcp_path:
+            return RedirectResponse(url=f"{mcp_path}/")
+
+        # If it's a .well-known path with /mcp, strip it for correct routing
+        if ".well-known" in request.url.path and request.url.path.endswith(mcp_path):
+            new_path = request.url.path[: -len(mcp_path)]
+            request.scope["path"] = new_path
+
+        return await call_next(request)
+
+
 class MCPAuthMiddleware(BaseHTTPMiddleware):
     """ASGI middleware that handles authentication for MCP endpoints"""
 
     async def dispatch(self, request: Request, call_next):
         # Only apply authentication to MCP endpoints (exact path or subpaths)
         path = request.url.path
-        mcp_path = Config.MCP_PATH
+        mcp_path = Config.MCP_PATH.rstrip("/")
 
-        # Get out early if not an MCP endpoint
-        if not path.startswith(mcp_path):
+        # Get out early if not an MCP endpoint or if it's a .well-known path
+        if not path.startswith(mcp_path) or ".well-known" in path:
             return await call_next(request)
 
         # Get authorization header
@@ -112,9 +128,15 @@ def create_asgi_app():
     with flask_app.app_context():
         mcp_app = get_http_app()
 
+    # Define middleware stack
+    middleware = [
+        Middleware(RedirectMiddleware),
+        Middleware(MCPAuthMiddleware),
+    ]
+
     # Create the Starlette application with authentication middleware AND lifespan
     app = Starlette(
-        middleware=[Middleware(MCPAuthMiddleware)],
+        middleware=middleware,
         lifespan=mcp_app.lifespan,  # CRITICAL: Pass FastMCP's lifespan to Starlette
     )
 

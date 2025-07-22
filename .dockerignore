@@ -68,6 +68,7 @@ data/
 # Ignore fly build artifacts
 fly.toml
 Dockerfile
+deploy-check.sh
 
 # Ignore OS-specific files
 .DS_Store

@@ -39,7 +39,7 @@ class Config:
 
     # MCP Server settings
     MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
-    MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+    MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
     MCP_PATH = os.environ.get("MCP_PATH", "/mcp")
     MCP_LOG_LEVEL = os.environ.get("MCP_LOG_LEVEL", "info")
     MCP_API_KEY = os.environ.get("MCP_API_KEY")
