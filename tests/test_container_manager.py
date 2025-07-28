@@ -54,7 +54,7 @@ class TestContainerManager(unittest.TestCase):
         )
         self.assertEqual(
             self.manager._parse_install_command(server_npx),
-            "npm install -g @my-scope/my-package",
+            "npm install -g --no-audit @my-scope/my-package",
         )
 
         # Full npx command
@@ -63,7 +63,7 @@ class TestContainerManager(unittest.TestCase):
         )
         self.assertEqual(
             self.manager._parse_install_command(server_npx_full),
-            "npm install -g @another/package",
+            "npm install -g --no-audit @another/package",
         )
 
         # Python pip command

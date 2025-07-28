@@ -49,7 +49,7 @@ class ProviderFilterMiddleware(Middleware):
     ) -> Dict[str, Any]:
         """
         Handle tool calls, logging for debugging purposes.
-        
+
         Since tools are already mounted with their full prefixed names
         (e.g., "d2107d3d_execute_code"), we don't need to modify the
         tool names - FastMCP's routing will handle them correctly.
@@ -58,6 +58,6 @@ class ProviderFilterMiddleware(Middleware):
         # The actual tool name is embedded in the JSON-RPC request,
         # but we don't need to modify it since FastMCP handles routing
         logger.debug("Processing tool call through middleware")
-        
+
         # Pass through to the next handler without modification
         return await call_next(ctx)

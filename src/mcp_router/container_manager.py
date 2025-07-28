@@ -101,13 +101,17 @@ class ContainerManager:
             # If user provides "npx @package", transform to proper install
             if cmd_parts[0] == "npx":
                 package = cmd_parts[1].strip()
-                return f"npm install -g {package}"
-            # If already npm install, keep as is
+                # Add --no-audit flag to speed up npm install
+                return f"npm install -g --no-audit {package}"
+            # If already npm install, add optimization flags
             elif cmd_parts[0] == "npm" and cmd_parts[1] == "install":
+                # Add --no-audit if not already present
+                if "--no-audit" not in cmd:
+                    return cmd.replace("npm install", "npm install --no-audit")
                 return cmd
             # Otherwise assume it's a package name
             else:
-                return f"npm install -g {cmd_parts[0]}"
+                return f"npm install -g --no-audit {cmd_parts[0]}"
 
         # For Python/uvx, return as-is since pip/uvx handle their own parsing
         return cmd
@@ -304,14 +308,20 @@ class ContainerManager:
                 keep_template=True,
                 commit_container=True,
                 docker_host=self.docker_host,
+                execution_timeout=Config.DOCKER_TIMEOUT,  # Use configured timeout
+                default_timeout=Config.DOCKER_TIMEOUT,  # Use configured timeout
                 runtime_config={
                     "mem_limit": "512m",  # Reduced memory to work within Fly.io constraints
                     "cpu_quota": 100000,  # 1 CPU to speed up builds
                 },
             ) as session:
+                # Progress logging
+                logger.info(f"Step 1/3: Setting up container for {server.name}...")
+
                 # Install dependencies only if install_command is not empty
                 if install_command:
-                    logger.info(f"Installing dependencies: {install_command}")
+                    logger.info(f"Step 2/3: Installing {server.name} dependencies...")
+                    logger.info(f"Running: {install_command}")
                     result = session.execute_command(install_command)
 
                     if result.exit_code != 0:
@@ -330,7 +340,7 @@ class ContainerManager:
 
                 # Commit the container to a new image with explicit settings
                 # Use a larger timeout and resource-friendly settings
-                logger.info(f"Committing container to image {image_tag}...")
+                logger.info(f"Step 3/3: Creating image {image_tag}...")
                 container.commit(
                     repository=image_tag,
                     conf={
