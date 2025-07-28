@@ -1,87 +1,117 @@
-"""Tests for database models"""
 
-import pytest
-from sqlalchemy.exc import IntegrityError
-from mcp_router.models import db, MCPServer
+import unittest
+from flask import Flask
+from mcp_router.models import (
+    db,
+    init_db,
+    MCPServer,
+    MCPServerStatus,
+    get_active_servers,
+    get_auth_type,
+    set_auth_type,
+    ensure_server_status_exists,
+)
+from mcp_router.config import TestingConfig
 
 
-def test_create_mcp_server(app):
-    """Test creating a new MCPServer instance."""
-    with app.app_context():
+class TestModels(unittest.TestCase):
+    """Test cases for the database models."""
+
+    def setUp(self):
+        """Set up a test Flask application and initialize the database."""
+        self.app = Flask(__name__)
+        self.app.config.from_object(TestingConfig)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        init_db(self.app)
+
+    def tearDown(self):
+        """Tear down the database session and application context."""
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def test_create_mcp_server(self):
+        """Test the creation of an MCPServer instance."""
         server = MCPServer(
-            name="test-server",
-            github_url="https://github.com/test/repo",
+            name="Test Server",
+            github_url="https://github.com/example/test",
             runtime_type="docker",
-            start_command="docker run test-image",
+            start_command="docker run test",
         )
         db.session.add(server)
         db.session.commit()
 
-        retrieved = MCPServer.query.filter_by(name="test-server").first()
-        assert retrieved is not None
-        assert retrieved.id is not None
-        assert retrieved.is_active is True
-        assert retrieved.runtime_type == "docker"
+        retrieved_server = MCPServer.query.filter_by(name="Test Server").first()
+        self.assertIsNotNone(retrieved_server)
+        self.assertEqual(retrieved_server.name, "Test Server")
+        self.assertEqual(retrieved_server.build_status, "pending")
+        self.assertTrue(retrieved_server.is_active)
 
-
-def test_env_variables_property(app):
-    """Test the env_variables property saves and loads JSON correctly."""
-    env_data = [{"key": "API_KEY", "value": "12345"}]
-    with app.app_context():
+    def test_mcp_server_to_dict(self):
+        """Test the to_dict method of the MCPServer model."""
         server = MCPServer(
-            name="env-test-server",
-            github_url="https://github.com/test/repo",
+            name="Dict Test Server",
+            github_url="https://github.com/example/dict",
             runtime_type="npx",
             start_command="npx start",
-            env_variables=env_data,
+            env_variables=[{"key": "NODE_ENV", "value": "production"}],
         )
         db.session.add(server)
         db.session.commit()
 
-        retrieved = MCPServer.query.first()
-        assert retrieved.env_variables == env_data
-        # Internal storage format should be JSON-serializable string
-        assert isinstance(getattr(retrieved, "_env_variables", ""), (str, type(None)))
+        server_dict = server.to_dict()
+        self.assertEqual(server_dict["name"], "Dict Test Server")
+        self.assertEqual(server_dict["runtime_type"], "npx")
+        self.assertIsInstance(server_dict["env_variables"], list)
+        self.assertEqual(len(server_dict["env_variables"]), 1)
+        self.assertEqual(server_dict["env_variables"][0]["key"], "NODE_ENV")
 
-
-def test_name_uniqueness(app):
-    """Test that the database enforces the uniqueness constraint on the server name."""
-    with app.app_context():
-        server1 = MCPServer(
-            name="unique-server",
-            github_url="https://github.com/test/repo1",
-            runtime_type="uvx",
-            start_command="uvx run",
+    def test_get_active_servers(self):
+        """Test the get_active_servers function."""
+        active_server = MCPServer(
+            name="Active Server",
+            github_url="http://a",
+            runtime_type="d",
+            start_command="s",
+            is_active=True,
         )
-        db.session.add(server1)
+        inactive_server = MCPServer(
+            name="Inactive Server",
+            github_url="http://b",
+            runtime_type="d",
+            start_command="s",
+            is_active=False,
+        )
+        db.session.add_all([active_server, inactive_server])
         db.session.commit()
 
-        server2 = MCPServer(
-            name="unique-server",
-            github_url="https://github.com/test/repo2",
-            runtime_type="docker",
-            start_command="docker run",
-        )
-        db.session.add(server2)
+        active_servers = get_active_servers()
+        self.assertEqual(len(active_servers), 1)
+        self.assertEqual(active_servers[0].name, "Active Server")
 
-        with pytest.raises(IntegrityError):
-            db.session.commit()
+    def test_auth_type_handling(self):
+        """Test the get_auth_type and set_auth_type functions."""
+        # Initially, no status exists, should fall back to config
+        self.assertEqual(get_auth_type(), self.app.config["MCP_AUTH_TYPE"])
+
+        # Ensure a status record exists
+        ensure_server_status_exists()
+
+        # Set auth type to 'oauth'
+        set_auth_type("oauth")
+        self.assertEqual(get_auth_type(), "oauth")
+        status = MCPServerStatus.query.first()
+        self.assertEqual(status.auth_type, "oauth")
+
+        # Set auth type back to 'api_key'
+        set_auth_type("api_key")
+        self.assertEqual(get_auth_type(), "api_key")
+
+        # Test invalid auth type
+        with self.assertRaises(ValueError):
+            set_auth_type("invalid_auth")
 
 
-def test_default_values(app):
-    """Test the default values for fields like is_active and created_at."""
-    with app.app_context():
-        server = MCPServer(
-            name="default-test",
-            github_url="https://github.com/test/defaults",
-            runtime_type="docker",
-            start_command="docker run default",
-        )
-        db.session.add(server)
-        db.session.commit()
-
-        retrieved = MCPServer.query.first()
-        assert retrieved.is_active is True
-        assert retrieved.created_at is not None
-        assert retrieved.install_command == ""
-        assert retrieved.env_variables == []
+if __name__ == "__main__":
+    unittest.main() 

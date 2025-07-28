@@ -8,7 +8,7 @@ import secrets
 import hashlib
 import time
 import jwt
-from typing import Dict, Optional, Tuple, Any, Callable, Awaitable
+from typing import Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, request, jsonify, redirect
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -249,7 +249,9 @@ def create_oauth_blueprint() -> Blueprint:
             )
 
         # Validate client and redirect URI
-        if client_id != auth_code_data["client_id"] or redirect_uri != auth_code_data["redirect_uri"]:
+        if (
+            client_id != auth_code_data["client_id"] or redirect_uri != auth_code_data["redirect_uri"]
+        ):
             return jsonify({"error": "invalid_grant"}), 400
 
         # Generate access token
@@ -294,44 +296,3 @@ def verify_token(token: str) -> Optional[Dict]:
         return None
     except jwt.InvalidTokenError:
         return None
-
-
-def create_bearer_auth_provider() -> (
-    Callable[[Dict[str, str]], Awaitable[Optional[Dict[str, Any]]]]
-):
-    """Create a bearer token validator for FastMCP
-
-    Returns:
-        Async function that validates bearer tokens
-    """
-
-    async def validate_bearer_token(headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
-        """Validate Bearer token from request headers
-
-        Args:
-            headers: Request headers dictionary
-
-        Returns:
-            Session data dictionary if valid, None otherwise
-        """
-        auth_header = headers.get("authorization", "")
-
-        if not auth_header.startswith("Bearer "):
-            return None
-
-        token = auth_header[7:]  # Remove 'Bearer ' prefix
-
-        # Verify token
-        payload = verify_token(token)
-        if not payload:
-            return None
-
-        # Return session data
-        return {
-            "user_id": payload.get("sub"),
-            "client_id": payload.get("client_id"),
-            "scopes": payload.get("scope", "").split(),
-            "token_payload": payload,
-        }
-
-    return validate_bearer_token

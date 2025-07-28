@@ -1,14 +1,15 @@
 """Database models for MCP Router"""
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import JSON, text
+from mcp_router.logging_config import get_logger
+
 from mcp_router.config import Config
-import logging
 
 db = SQLAlchemy()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MCPServer(db.Model):
@@ -16,7 +17,7 @@ class MCPServer(db.Model):
 
     __tablename__ = "mcp_servers"
 
-    id = db.Column(db.String(32), primary_key=True, default=lambda: generate_id())
+    id = db.Column(db.String(8), primary_key=True, default=lambda: generate_id())
     name = db.Column(db.String(100), unique=True, nullable=False)
     github_url = db.Column(db.String(500), nullable=False)
     description = db.Column(db.Text)
@@ -26,6 +27,13 @@ class MCPServer(db.Model):
     env_variables = db.Column(JSON, nullable=False, default=list)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # After the existing fields
+    build_status = db.Column(db.String(20), nullable=False, default="pending")
+
+    build_error = db.Column(db.Text)
+
+    image_tag = db.Column(db.String(200))
 
     def __repr__(self):
         return f"<MCPServer {self.name}>"
@@ -43,6 +51,9 @@ class MCPServer(db.Model):
             "env_variables": self.env_variables,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "build_status": self.build_status,
+            "build_error": self.build_error,
+            "image_tag": self.image_tag,
         }
 
 
@@ -86,7 +97,7 @@ def generate_id() -> str:
     """Generate a unique ID for servers"""
     import uuid
 
-    return uuid.uuid4().hex[:32]
+    return uuid.uuid4().hex[:8]
 
 
 def init_db(app) -> None:
@@ -132,6 +143,32 @@ def init_db(app) -> None:
                     f"Successfully added auth_type column with default '{default_auth_type}'"
                 )
 
+            # Check column existence in mcp_servers table for new build fields
+            result = db.session.execute(text("PRAGMA table_info(mcp_servers)")).fetchall()
+            column_names = [row[1] for row in result]
+
+            # Add new columns if they don't exist
+            if "build_status" not in column_names:
+                logger.info("Adding build_status column to mcp_servers table")
+                db.session.execute(
+                    text(
+                        "ALTER TABLE mcp_servers ADD COLUMN build_status VARCHAR(20) DEFAULT 'pending'"
+                    )
+                )
+                db.session.commit()
+
+            if "build_error" not in column_names:
+                logger.info("Adding build_error column to mcp_servers table")
+                db.session.execute(text("ALTER TABLE mcp_servers ADD COLUMN build_error TEXT"))
+                db.session.commit()
+
+            if "image_tag" not in column_names:
+                logger.info("Adding image_tag column to mcp_servers table")
+                db.session.execute(
+                    text("ALTER TABLE mcp_servers ADD COLUMN image_tag VARCHAR(200)")
+                )
+                db.session.commit()
+
         except Exception as e:
             logger.error(f"Error during database migration: {e}")
             # If there's an error, try to recreate the table
@@ -145,18 +182,6 @@ def init_db(app) -> None:
                 logger.error(f"Failed to recreate table: {e2}")
 
 
-def get_server_by_id(server_id: str) -> Optional[MCPServer]:
-    """Get server by ID
-
-    Args:
-        server_id: The server ID to look up
-
-    Returns:
-        MCPServer instance if found, None otherwise
-    """
-    return MCPServer.query.get(server_id)
-
-
 def get_active_servers() -> List[MCPServer]:
     """Get all active servers
 
@@ -164,43 +189,6 @@ def get_active_servers() -> List[MCPServer]:
         List of active MCPServer instances
     """
     return MCPServer.query.filter_by(is_active=True).all()
-
-
-def get_server_status() -> Optional[MCPServerStatus]:
-    """Get current MCP server status
-
-    Returns:
-        MCPServerStatus instance if exists, None otherwise
-    """
-    return MCPServerStatus.query.first()
-
-
-def update_server_status(transport: str, status: str, **kwargs) -> MCPServerStatus:
-    """Update or create server status
-
-    Args:
-        transport: Transport type (stdio, http)
-        status: Server status (running, stopped, error)
-        **kwargs: Additional fields to update (pid, port, host, etc.)
-
-    Returns:
-        Updated MCPServerStatus instance
-    """
-    server_status = MCPServerStatus.query.first()
-    if not server_status:
-        server_status = MCPServerStatus(transport=transport, status=status)
-        db.session.add(server_status)
-    else:
-        server_status.transport = transport
-        server_status.status = status
-
-    # Update additional fields
-    for key, value in kwargs.items():
-        if hasattr(server_status, key):
-            setattr(server_status, key, value)
-
-    db.session.commit()
-    return server_status
 
 
 def get_auth_type() -> str:
@@ -243,7 +231,6 @@ def ensure_server_status_exists() -> MCPServerStatus:
     Returns:
         MCPServerStatus instance (existing or newly created)
     """
-    from mcp_router.config import Config
 
     server_status = MCPServerStatus.query.first()
     if not server_status:
@@ -256,3 +243,116 @@ def ensure_server_status_exists() -> MCPServerStatus:
         logger.info(f"Created server status record with auth_type: {Config.MCP_AUTH_TYPE}")
 
     return server_status
+
+
+def clear_database() -> None:
+    """Clear all data from the database tables.
+
+    This function drops all tables and recreates them, effectively clearing
+    all data. This is useful for fresh deployments.
+    """
+    logger.info("Clearing database...")
+    try:
+        # Drop all tables
+        db.drop_all()
+        logger.info("All tables dropped successfully")
+
+        # Recreate all tables
+        db.create_all()
+        logger.info("All tables recreated successfully")
+
+        # Perform any necessary migrations
+        logger.info("Running post-creation migrations...")
+        # The migrations will be handled by init_db if needed
+
+        logger.info("Database cleared successfully")
+    except Exception as e:
+        logger.error(f"Error clearing database: {e}")
+        raise
+
+
+def get_connection_status(request=None) -> Dict[str, Any]:
+    """Get the current connection status and configuration.
+
+    Note: This function requires a Flask app context when transport is 'http'
+    because it queries the database for auth type.
+
+    Args:
+        request: Optional Flask request object for determining URLs
+
+    Returns:
+        Dict containing transport mode, status, and connection info
+    """
+    status_info = {
+        "transport": Config.MCP_TRANSPORT,
+        "status": "running",  # If this code is running, the app is running
+    }
+
+    if Config.MCP_TRANSPORT == "stdio":
+        # For STDIO mode, show command for local clients
+        status_info.update(
+            {
+                "connection_info": {
+                    "type": "stdio",
+                    "description": "Connect via Claude Desktop or local clients",
+                    "command": "python -m mcp_router --transport stdio",
+                    "web_ui_url": f"http://127.0.0.1:{Config.FLASK_PORT}",
+                    "web_ui_description": "Web UI running in background for server management",
+                    "config_download_url": f"http://127.0.0.1:{Config.FLASK_PORT}/config/claude-desktop",
+                    "config_description": "Download Claude Desktop configuration file",
+                }
+            }
+        )
+    elif Config.MCP_TRANSPORT == "http":
+        # Determine base URL from request if available
+        if request:
+            scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+            host = request.headers.get("X-Forwarded-Host", request.host)
+            base_url = f"{scheme}://{host}"
+        else:
+            base_url = f"http://{Config.MCP_HOST}:{Config.FLASK_PORT}"
+
+        mcp_url = f"{base_url}{Config.MCP_PATH}"
+
+        status_info.update(
+            {
+                "connection_info": {
+                    "type": "http",
+                    "mcp_endpoint": mcp_url,
+                    "web_ui_url": base_url,
+                    "path": Config.MCP_PATH,
+                },
+                "host": Config.MCP_HOST,
+                "port": Config.FLASK_PORT,
+            }
+        )
+
+        # Add authentication information
+        current_auth_type = get_auth_type()
+
+        # Always show both auth methods are available
+        auth_info = {
+            "auth_type": current_auth_type,
+            "oauth_available": True,
+            "oauth_metadata_url": f"{base_url}/.well-known/oauth-authorization-server",
+        }
+
+        if current_auth_type == "oauth":
+            auth_info.update(
+                {
+                    "primary_auth": "OAuth 2.1 with PKCE",
+                    "api_key_available": True,
+                }
+            )
+        else:  # api_key
+            auth_info.update(
+                {
+                    "primary_auth": "API Key",
+                    "api_key": Config.MCP_API_KEY if Config.MCP_API_KEY else "auto-generated",
+                    "oauth_hint": "Switch to OAuth for enhanced security",
+                }
+            )
+
+        status_info["connection_info"].update(auth_info)
+
+    return status_info

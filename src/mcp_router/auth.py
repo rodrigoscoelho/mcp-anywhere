@@ -8,6 +8,9 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_wtf import FlaskForm
 from wtforms import PasswordField, validators
 from mcp_router.config import Config
+from mcp_router.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # Simple user class for Flask-Login
@@ -64,7 +67,7 @@ def init_auth(app) -> None:
         if not app.config.get("DEBUG", False):
             raise ValueError("ADMIN_PASSCODE must be set in production environment")
 
-        app.logger.warning("No ADMIN_PASSCODE set! Using default for development only")
+        logger.warning("No ADMIN_PASSCODE set! Using default for development only")
         passcode = "changeme123"  # Default for development only
 
     # Hash the passcode for storage

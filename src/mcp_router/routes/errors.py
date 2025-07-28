@@ -1,11 +1,11 @@
 """Error handlers and utility routes"""
 
-import logging
 from typing import Tuple
 from flask import render_template, Flask
 from werkzeug.exceptions import HTTPException
+from mcp_router.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def register_error_handlers(app: Flask) -> None:

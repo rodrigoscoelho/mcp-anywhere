@@ -1,6 +1,5 @@
 """Main Flask application for MCP Router"""
 
-import logging
 from typing import Dict, Any
 from flask import Flask
 from flask_cors import CORS
@@ -10,17 +9,14 @@ from mcp_router.routes import servers_bp, mcp_bp, config_bp, register_error_hand
 from mcp_router.routes.mcp import register_csrf_exemptions
 from mcp_router.models import init_db
 from mcp_router.auth import init_auth
-from mcp_router.server_manager import init_server_manager
 from threading import Thread
-from mcp_router.container_manager import ContainerManager
+from mcp_router.logging_config import get_logger
 from mcp_router.config import Config
 from mcp_router.mcp_oauth import create_oauth_blueprint
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
@@ -63,16 +59,12 @@ csrf = CSRFProtect(app)
 init_db(app)
 init_auth(app)  # Initialize authentication
 
-# Initialize server manager with app context
-app.server_manager = init_server_manager(app)
-
 # Register OAuth blueprint for MCP server authentication
 oauth_bp = create_oauth_blueprint()
 app.register_blueprint(oauth_bp)
 
 # Exempt OAuth endpoints from CSRF protection
 csrf.exempt(oauth_bp)
-
 
 app.register_blueprint(servers_bp)
 app.register_blueprint(mcp_bp)
@@ -83,24 +75,6 @@ register_csrf_exemptions(csrf)
 
 # Register error handlers
 register_error_handlers(app)
-
-
-# Background Docker image preparation
-def _prepare_images() -> None:
-    with app.app_context():
-        logger.info("Starting background preparation of Docker images...")
-        manager = ContainerManager(app)
-        default_images = [Config.MCP_PYTHON_IMAGE, Config.MCP_NODE_IMAGE]
-        for image in default_images:
-            try:
-                manager.ensure_image_exists(image)
-            except Exception as e:
-                logger.warning(f"Failed to pre-pull Docker image {image}: {e}")
-        logger.info("Background image preparation complete.")
-
-
-# Kick off background preparation thread immediately
-Thread(target=_prepare_images, daemon=True).start()
 
 
 # Register context processor

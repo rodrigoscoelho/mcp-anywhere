@@ -17,6 +17,7 @@ kill_timeout = '5s'
   FLASK_PORT = '8000'
   MCP_HOST = '0.0.0.0'
   MCP_AUTH_TYPE = 'oauth'
+  MCP_TRANSPORT = 'http'
 
 [[mounts]]
   source = 'mcp_router_data'
@@ -56,7 +57,10 @@ kill_timeout = '5s'
 # Note: MCP server is now mounted at /mcp on the main service (port 8000)
 # No separate service needed due to the new dual transport architecture
 
+[processes]
+  app = 'tini -s -- python -m mcp_router --clear-db'
+
 [[vm]]
-  memory = '2gb'
+  memory = '4gb'
   cpu_kind = 'shared'
   cpus = 2

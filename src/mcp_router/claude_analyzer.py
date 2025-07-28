@@ -5,11 +5,11 @@ import base64
 import httpx
 from anthropic import Anthropic, AnthropicError
 from typing import Dict, Any, Optional
-import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from mcp_router.config import Config
+from mcp_router.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ClaudeAnalyzer:
@@ -132,28 +132,31 @@ Here are the contents of key files:
 
 Based on the file contents, extract the following information. Be precise and concise.
 
-IMPORTANT: The servers will run in containerized environments. Keep these guidelines in mind:
-- Prefer simple commands over complex ones with custom paths
-- For Node.js packages, prefer "npx @package/name" over "npm install -g" with custom prefixes
-- Global installations with custom paths (e.g., --prefix=~/.global-node-modules) often fail in containers
-- If a package can be run directly with npx, use that instead of installing globally first
+IMPORTANT: The servers will run in containerized environments. Provide the full, actual commands that would be used to install and run the server.
 
-1.  **Runtime type**: Determine if this is 'npx' (for Node.js), 'uvx' (for Python), or 'docker'. Prioritize `pyproject.toml` for Python projects and `package.json` for Node.js projects.
-2.  **Install command**: The command to install dependencies. For npx packages that can be run directly (e.g., npx @org/package), use "none". Avoid complex global installs.
-3.  **Start command**: The command to run the server. For npx, prefer "npx @org/package" over complex paths. This is the most critical piece of information.
-4.  **Server name**: A short, descriptive, machine-readable name for the server (e.g., "financial-data-api").
-5.  **Description**: A brief, one-sentence description of the server's purpose.
-6.  **Environment Variables**: List any required environment variables, their purpose, and if they are required.
+1. **Runtime type**: Determine if this is 'npx' (for Node.js), 'uvx' (for Python), or 'docker'. Prioritize `pyproject.toml` for Python projects and `package.json` for Node.js projects.
 
-Examples of preferred commands:
-- GOOD: npx @ahrefs/mcp (simple, direct)
-- BAD: npm install --prefix=~/.global-node-modules @ahrefs/mcp -g && npx --prefix=~/.global-node-modules @ahrefs/mcp (complex, likely to fail in containers)
+2. **Install command**: The full command to install the package/dependencies. This command will be run during the container build process.
+   - For npx packages: "npm install -g @org/package" (e.g., "npm install -g @ahrefs/mcp")
+   - For uvx packages: "pip install package-name" or "pip install -e ."
+   - For docker: appropriate install commands or "none" if using a pre-built image
+
+3. **Start command**: The full command to run the server. This is the exact command you would type to start the server.
+   - For npx: "npx @org/package" (e.g., "npx @ahrefs/mcp")
+   - For uvx: "uvx package-name" or "python -m package"
+   - For docker: the command to start the server
+
+4. **Server name**: A short, descriptive, machine-readable name for the server (e.g., "financial-data-api").
+
+5. **Description**: A brief, one-sentence description of the server's purpose.
+
+6. **Environment Variables**: List any required environment variables, their purpose, and if they are required.
 
 Respond in this exact, parsable format. Do not add any conversational text or pleasantries.
 
 RUNTIME: [npx|uvx|docker]
-INSTALL: [command or "none"]
-START: [command]
+INSTALL: [full install command]
+START: [full start command]
 NAME: [server name]
 DESCRIPTION: [one-line description]
 ENV_VARS:
@@ -177,6 +180,7 @@ ENV_VARS:
                 result["runtime_type"] = line.split(":", 1)[1].strip()
             elif line.startswith("INSTALL:"):
                 cmd = line.split(":", 1)[1].strip()
+                # Keep the full command, including "none" if specified
                 result["install_command"] = cmd if cmd.lower() != "none" else ""
             elif line.startswith("START:"):
                 result["start_command"] = line.split(":", 1)[1].strip()

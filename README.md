@@ -1,6 +1,6 @@
 # MCP Router
 
-A unified gateway for Model Context Protocol (MCP) servers with dual transport support, web management, intelligent routing, and sandboxed execution.
+A unified gateway for Model Context Protocol (MCP) servers with dual transport support, web management, intelligent routing, and containerized execution.
 
 ![MCP Router Demo](assets/intro.gif)
 
@@ -11,11 +11,13 @@ MCP Router provides:
 - **Single Gateway**: Unified access to multiple MCP servers (no more juggling configs)
 - **Web UI**: Server management with real-time status and configuration
 - **Smart Routing**: Hierarchical tool discovery (prevents LLM tool overload)
-- **Sandboxed Execution**: Docker-based Python sandbox and containerized MCP servers
+- **Containerized Execution**: Docker-based isolation for all MCP servers
 - **Production Ready**: OAuth 2.1 and API key authentication for remote access
 - **Dynamic Authentication**: Switch between OAuth and API key authentication through the web UI
 
-## Quick Deploy to Fly.io
+## Quick Start
+
+### Deploy to Fly.io
 
 ```bash
 # Install Fly CLI if you haven't already
@@ -32,12 +34,15 @@ fly secrets set ADMIN_PASSCODE=your-secure-passcode
 fly secrets set ANTHROPIC_API_KEY=sk-ant-your-key-here
 fly deploy
 
+# Note: The fly.toml is configured to clear the database on each deployment
+# This ensures a fresh start with the Python Sandbox server pre-configured
+
 # Access your deployment
 # Web UI: https://your-app-name.fly.dev
 # MCP endpoint: https://your-app-name.fly.dev/mcp/
 ```
 
-## Local Development
+### Local Development
 
 ```bash
 # Clone repository
@@ -49,7 +54,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp env.example .env
-nano .env  # Add ANTHROPIC_API_KEY and ADMIN_PASSCODE
+# Edit .env to add your ANTHROPIC_API_KEY and set ADMIN_PASSCODE
 
 # HTTP Mode (Production-like, single port)
 python -m mcp_router --transport http
@@ -60,6 +65,9 @@ python -m mcp_router --transport http
 python -m mcp_router --transport stdio
 # Access web UI: http://localhost:8000 (background)
 # Connect via Claude Desktop (stdio)
+
+# Clear database on startup (useful for fresh starts)
+python -m mcp_router --clear-db
 ```
 
 ## Configuration
@@ -78,11 +86,6 @@ MCP_TRANSPORT=http                     # "stdio" or "http" (default: http)
 MCP_AUTH_TYPE=oauth                    # "oauth" or "api_key" (default: api_key)
 MCP_API_KEY=auto-generated             # API key for authentication (auto-generated if not set)
 
-# OAuth Settings (when MCP_AUTH_TYPE=oauth)
-OAUTH_ISSUER=""                        # JWT issuer (auto-detected if blank)
-OAUTH_AUDIENCE=mcp-server              # OAuth audience identifier
-OAUTH_TOKEN_EXPIRY=3600                # Token lifetime in seconds
-
 # Server Configuration
 FLASK_PORT=8000                        # Application port
 MCP_PATH=/mcp                          # MCP endpoint path (HTTP mode)
@@ -91,19 +94,11 @@ MCP_PATH=/mcp                          # MCP endpoint path (HTTP mode)
 DOCKER_HOST=unix:///var/run/docker.sock  # Docker socket location
 MCP_PYTHON_IMAGE=python:3.11-slim       # Python image for uvx servers
 MCP_NODE_IMAGE=node:20-slim             # Node.js image for npx servers
+DOCKER_TIMEOUT=300                      # Docker operation timeout in seconds (default: 300)
 
 # Database
-DATABASE_URL=sqlite:////data/mcp_router.db  # Database location
+DATABASE_URL=sqlite:///data/mcp_router.db  # Database location
 ```
-
-### Fly.io Deployment Configuration
-
-Your `fly.toml` is pre-configured for:
-- Single service on port 8000 serving both Web UI and MCP endpoints
-- HTTPS termination with automatic redirects
-- Persistent volume at `/data` for SQLite database
-- Memory: 2GB, CPU: 2 shared cores
-- Docker-in-Docker support for containerized MCP servers
 
 ## Usage
 
@@ -134,7 +129,7 @@ Then configure Claude Desktop:
 ```json
 {
   "mcpServers": {
-    "mcp-router-local": {
+    "mcp-router": {
       "command": "python",
       "args": ["-m", "mcp_router", "--transport", "stdio"]
     }
@@ -165,17 +160,6 @@ async with Client(
     )
 ```
 
-For OAuth authentication:
-```python
-# OAuth flow (get token from OAuth provider)
-async with Client(
-    "https://your-app.fly.dev/mcp/",
-    auth=BearerAuth(token="oauth-access-token")
-) as client:
-    # Same usage as API key
-    providers = await client.call_tool("list_providers")
-```
-
 ### 3. Test with MCP Inspector
 
 Test your deployed MCP Router with the official MCP Inspector:
@@ -186,14 +170,9 @@ npx @modelcontextprotocol/inspector https://your-app.fly.dev/mcp/
 
 # Test local STDIO mode
 npx @modelcontextprotocol/inspector python -m mcp_router --transport stdio
-
-# Test with custom config
-npx @modelcontextprotocol/inspector --config inspector_config.json --server mcp-router-dev
 ```
 
-The web UI provides downloadable configuration files:
-- **Claude Desktop Config**: For STDIO mode integration
-- **Local Inspector Config**: For testing with MCP Inspector
+The web UI provides downloadable configuration files for Claude Desktop and MCP Inspector testing.
 
 ### 4. Dynamic Authentication Switching
 
@@ -248,19 +227,18 @@ In HTTP mode, you can switch between OAuth and API key authentication through th
 1. **Initial**: Only `list_providers` and `python_sandbox` visible
 2. **Discovery**: `list_providers()` returns available servers
 3. **Server Tools**: Access via `provider` parameter
-4. **Execution**: Routed to appropriate sandboxed container
+4. **Execution**: Routed to appropriate containerized server
 
 ## Development
 
 ### Running Tests
 ```bash
 # Run all tests
-pytest -v
+pytest
 
 # Run specific test categories
 pytest tests/test_auth.py -v
 pytest tests/test_container_manager.py -v
-pytest tests/test_web_ui.py -v
 ```
 
 ### Key Files
@@ -289,20 +267,19 @@ docker ps
 docker system prune -a
 ```
 
+**Database issues:**
+```bash
+# Clear database and start fresh
+python -m mcp_router --clear-db
+
+# The Python Sandbox server will be automatically recreated
+```
+
 **Authentication failures:**
 - Ensure `ADMIN_PASSCODE` is set (min 8 chars)
 - Check API key in Connection Information panel
 - Verify OAuth credentials if using OAuth mode
 - Use the authentication type toggle to switch between methods
-
-**MCP Inspector connection issues:**
-```bash
-# Test with explicit authentication
-npx @modelcontextprotocol/inspector \
-  --transport http \
-  --server-url https://your-app.fly.dev/mcp/ \
-  --auth-token your-api-key
-```
 
 **Container runtime issues:**
 - Ensure Docker daemon is running

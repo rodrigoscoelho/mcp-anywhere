@@ -16,15 +16,24 @@ dependencies = [
     "Flask-SQLAlchemy>=2.5",
     "Flask-WTF>=1.0",
     "Flask-Login>=0.6.0",
+    "flask-sock>=0.7.0",
+    "flask-cors>=4.0.0",
     "bcrypt>=4.0.0",
     "wtforms>=3.1.0",
     "fastmcp>=2.9.0",
     "llm-sandbox>=0.2.0",
+    "mcp>=1.1.2",
     "anthropic",
-    "httpx",
+    "httpx>=0.27.2",
     "python-dotenv>=1.0.0",
-    "flask-sock>=0.7.0",
-    "docker"
+    "docker",
+    "loguru>=0.7.0",
+    "pydantic>=2.10.3",
+    "PyJWT>=2.8.0",
+    "tenacity>=8.2.0",
+    "uvicorn[standard]>=0.24.0",
+    "starlette>=0.36.0",
+    "a2wsgi>=1.10.0"
 ]
 
 [project.optional-dependencies]

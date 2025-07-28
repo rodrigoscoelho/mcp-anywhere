@@ -1,13 +1,14 @@
 """MCP server control and proxy routes"""
 
-import logging
 from typing import Union
 from flask import Blueprint, render_template, request, jsonify, Response, flash
 from flask_login import login_required
 from flask_wtf.csrf import CSRFProtect
-from mcp_router.server_manager import get_server_manager
+from mcp_router.models import get_connection_status
+from mcp_router.logging_config import get_logger
+from mcp_router.models import set_auth_type
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Create blueprint
 mcp_bp = Blueprint("mcp", __name__)
@@ -39,8 +40,7 @@ def get_mcp_status() -> Union[str, Response]:
     Returns:
         HTML template for htmx requests or JSON for API requests
     """
-    server_manager = get_server_manager()
-    status = server_manager.get_status(request=request)
+    status = get_connection_status(request=request)
 
     # Return HTML for htmx requests
     if request.headers.get("HX-Request"):
@@ -64,8 +64,7 @@ def update_auth_type() -> Union[str, Response]:
         if auth_type not in ("oauth", "api_key"):
             if request.headers.get("HX-Request"):
                 flash(f"Invalid auth type '{auth_type}'. Must be 'oauth' or 'api_key'.", "error")
-                server_manager = get_server_manager()
-                status = server_manager.get_status()
+                status = get_connection_status(request=request)
                 return render_template("partials/mcp_status.html", status=status)
             else:
                 return (
@@ -74,20 +73,12 @@ def update_auth_type() -> Union[str, Response]:
                 )
 
         # Update auth type in database
-        from mcp_router.models import set_auth_type
-
         set_auth_type(auth_type)
-
-        # Clear auth type cache to force refresh
-        from mcp_router.asgi import clear_auth_type_cache
-
-        clear_auth_type_cache()
 
         logger.info(f"Auth type updated to: {auth_type}")
 
         # Get updated status
-        server_manager = get_server_manager()
-        status = server_manager.get_status()
+        status = get_connection_status(request=request)
 
         if request.headers.get("HX-Request"):
             flash(f"Authentication type switched to {auth_type.upper()}", "success")
@@ -99,8 +90,7 @@ def update_auth_type() -> Union[str, Response]:
         logger.error(f"Error updating auth type: {e}")
         if request.headers.get("HX-Request"):
             flash("Error updating authentication type", "error")
-            server_manager = get_server_manager()
-            status = server_manager.get_status()
+            status = get_connection_status(request=request)
             return render_template("partials/mcp_status.html", status=status)
         else:
             return jsonify({"error": "Internal server error"}), 500

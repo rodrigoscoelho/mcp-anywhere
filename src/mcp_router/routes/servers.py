@@ -1,7 +1,5 @@
 """Server management routes for MCP Router"""
 
-import asyncio
-import logging
 from typing import Union, Tuple
 from flask import (
     Blueprint,
@@ -22,7 +20,9 @@ from mcp_router.claude_analyzer import ClaudeAnalyzer
 from mcp_router.config import Config
 from flask import current_app
 
-logger = logging.getLogger(__name__)
+from mcp_router.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Create blueprint
 servers_bp = Blueprint("servers", __name__)
@@ -31,7 +31,7 @@ servers_bp = Blueprint("servers", __name__)
 def handle_dynamic_server_update(server: MCPServer, operation: str = "add") -> None:
     """
     Handle dynamic server updates for HTTP mode.
-    
+
     Args:
         server: MCPServer instance
         operation: Operation type ("add", "update", "delete")
@@ -40,29 +40,29 @@ def handle_dynamic_server_update(server: MCPServer, operation: str = "add") -> N
     if Config.MCP_TRANSPORT != "http":
         logger.info(f"STDIO mode detected - server {operation} requires restart")
         return
-    
+
     try:
         from mcp_router.server import get_dynamic_manager
-        
+
         dynamic_manager = get_dynamic_manager()
         if not dynamic_manager:
             logger.warning("Dynamic manager not available - server changes require restart")
             return
-        
+
         if operation == "add":
             dynamic_manager.add_server(server)
             logger.info(f"Completed dynamic addition of server '{server.name}'")
-            
+
         elif operation == "delete":
             dynamic_manager.remove_server(server.name)
             logger.info(f"Completed dynamic removal of server '{server.name}'")
-            
+
         elif operation == "update":
             # For updates, remove and re-add
             dynamic_manager.remove_server(server.name)
             dynamic_manager.add_server(server)
             logger.info(f"Completed dynamic update of server '{server.name}'")
-            
+
     except Exception as e:
         logger.error(f"Failed to handle dynamic server {operation}: {e}")
         # Don't raise - the database operation should still succeed
@@ -161,10 +161,37 @@ def add_server() -> Union[str, Response]:
                     db.session.add(server)
                     db.session.commit()
 
-                    # Handle dynamic server addition for HTTP mode
-                    handle_dynamic_server_update(server, "add")
+                    # Build the Docker image synchronously for new servers
+                    # This ensures the image exists before we try to mount it
+                    try:
+                        # Update status
+                        server.build_status = "building"
+                        db.session.commit()
 
-                    flash(f'Server "{server.name}" added successfully!', "success")
+                        # Build the image
+                        container_manager = ContainerManager(current_app)
+                        image_tag = container_manager.build_server_image(server)
+
+                        # Update server with success
+                        server.build_status = "built"
+                        server.image_tag = image_tag
+                        server.build_error = None
+                        db.session.commit()
+
+                        # Now that the image is built, handle dynamic server addition
+                        handle_dynamic_server_update(server, "add")
+
+                        flash(f'Server "{server.name}" added and built successfully!', "success")
+
+                    except Exception as e:
+                        logger.error(f"Failed to build image for {server.name}: {e}")
+                        server.build_status = "failed"
+                        server.build_error = str(e)
+                        db.session.commit()
+                        flash(
+                            f'Server "{server.name}" added but image build failed: {str(e)}',
+                            "error",
+                        )
 
                     # Handle HTMX requests with HX-Redirect to avoid duplicate headers
                     if request.headers.get("HX-Request"):
@@ -238,10 +265,10 @@ def edit_server(server_id: str) -> Union[str, Response]:
                 server.env_variables = env_vars
 
                 db.session.commit()
-                
+
                 # Handle dynamic server update for HTTP mode
                 handle_dynamic_server_update(server, "update")
-                
+
                 flash("Server updated successfully!", "success")
                 return redirect(url_for("servers.server_detail", server_id=server.id))
 
@@ -274,13 +301,13 @@ def delete_server(server_id: str) -> Response:
     try:
         # Store server name before deletion for dynamic management
         server_name = server.name
-        
+
         db.session.delete(server)
         db.session.commit()
-        
+
         # Handle dynamic server removal for HTTP mode
         handle_dynamic_server_update(server, "delete")
-        
+
         flash(f'Server "{server_name}" deleted successfully!', "success")
     except Exception as e:
         db.session.rollback()

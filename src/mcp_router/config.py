@@ -38,7 +38,7 @@ class Config:
     ANTHROPIC_MODEL_NAME = os.environ.get("ANTHROPIC_MODEL_NAME", "claude-sonnet-4-20250514")
 
     # MCP Server settings
-    MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+    MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "http")
     MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
     MCP_PATH = os.environ.get("MCP_PATH", "/mcp")
     MCP_LOG_LEVEL = os.environ.get("MCP_LOG_LEVEL", "info")
@@ -47,6 +47,12 @@ class Config:
     # Dynamic Authentication Type (preferred method)
     _auth_type = os.environ.get("MCP_AUTH_TYPE", "api_key")
     MCP_AUTH_TYPE = _auth_type if _auth_type in ("oauth", "api_key") else "api_key"
+
+    # Logging settings
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+    LOG_FORMAT = os.environ.get("LOG_FORMAT", None)  # Use default if not specified
+    LOG_FILE = os.environ.get("LOG_FILE", None)  # No file logging by default
+    LOG_JSON = os.environ.get("LOG_JSON", "false").lower() in ("true", "1", "yes")
 
     # OAuth settings
     # The issuer will be dynamically set based on the request URL
@@ -61,6 +67,7 @@ class Config:
     DOCKER_HOST = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")
     MCP_PYTHON_IMAGE = os.environ.get("MCP_PYTHON_IMAGE", "python:3.11-slim")
     MCP_NODE_IMAGE = os.environ.get("MCP_NODE_IMAGE", "node:20-slim")
+    DOCKER_TIMEOUT = int(os.environ.get("DOCKER_TIMEOUT", "300"))  # 5 minutes default
 
     # Application settings
     WTF_CSRF_ENABLED = True

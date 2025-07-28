@@ -1,8 +1,26 @@
 """Forms for MCP Router web interface"""
 
+import re
 from flask_wtf import FlaskForm
 from wtforms import StringField, SelectField, TextAreaField, BooleanField
 from wtforms.validators import DataRequired, URL, Length, ValidationError
+
+
+# Custom validators that can be reused across forms
+def validate_github_url(form, field):
+    """Validate GitHub URL format.
+
+    Args:
+        form: The form instance
+        field: The GitHub URL field to validate
+
+    Raises:
+        ValidationError: If URL is not a valid GitHub repository URL
+    """
+    if field.data:
+        pattern = r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$"
+        if not re.match(pattern, field.data.rstrip("/")):
+            raise ValidationError("Please enter a valid GitHub repository URL")
 
 
 class EnvironmentVariableForm(FlaskForm):
@@ -28,7 +46,7 @@ class ServerForm(FlaskForm):
 
     github_url = StringField(
         "GitHub URL",
-        validators=[DataRequired(), URL()],
+        validators=[DataRequired(), URL(), validate_github_url],
         render_kw={"placeholder": "https://github.com/owner/repo"},
     )
 
@@ -40,42 +58,28 @@ class ServerForm(FlaskForm):
 
     runtime_type = SelectField(
         "Runtime Type",
-        choices=[("npx", "Node.js (npx)"), ("uvx", "Python (uvx)"), ("docker", "Docker")],
+        choices=[
+            ("npx", "Node.js (npx)"),
+            ("uvx", "Python (uvx)"),
+            ("python-module", "Python Module"),
+        ],
         validators=[DataRequired()],
     )
 
     install_command = StringField(
         "Install Command",
         validators=[Length(max=500)],
-        render_kw={"placeholder": "npm install or pip install -e ."},
+        render_kw={"placeholder": "npm install -g @org/package or pip install package-name"},
     )
 
     start_command = StringField(
         "Start Command",
         validators=[DataRequired(), Length(max=500)],
-        render_kw={"placeholder": "npx mcp-server or python -m mcp_server"},
+        render_kw={"placeholder": "npx @org/package or python -m package"},
     )
 
-    # Environment variables are handled separately in the view
-
-    def validate_github_url(self, field: StringField) -> None:
-        """Validate GitHub URL format
-
-        Args:
-            field: The GitHub URL field to validate
-
-        Raises:
-            ValidationError: If URL is not a valid GitHub repository URL
-        """
-        import re
-
-        if field.data:
-            pattern = r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$"
-            if not re.match(pattern, field.data.rstrip("/")):
-                raise ValidationError("Please enter a valid GitHub repository URL")
-
     def validate_runtime_type(self, field: SelectField) -> None:
-        """Validate runtime type is one of allowed values
+        """Validate runtime type is one of allowed values.
 
         Args:
             field: The runtime type field to validate
@@ -83,9 +87,26 @@ class ServerForm(FlaskForm):
         Raises:
             ValidationError: If runtime type is not valid
         """
-        allowed_types = ["npx", "uvx", "docker"]
+        allowed_types = ["npx", "uvx", "python-module"]
         if field.data not in allowed_types:
             raise ValidationError(f'Runtime type must be one of: {", ".join(allowed_types)}')
+
+    def validate_install_command(self, field: StringField) -> None:
+        """Ensure install command is provided for npx/uvx servers.
+
+        Args:
+            field: The install command field to validate
+
+        Raises:
+            ValidationError: If install command is missing for npx/uvx servers
+        """
+        # Check if runtime_type is npx or uvx and install_command is empty
+        if hasattr(self, "runtime_type") and self.runtime_type.data in ["npx", "uvx"]:
+            if not field.data or not field.data.strip():
+                raise ValidationError(
+                    f"Install command is required for {self.runtime_type.data} servers. "
+                    f"For npx: 'npm install -g @org/package', for uvx: 'pip install package-name'"
+                )
 
 
 class AnalyzeForm(FlaskForm):
@@ -93,22 +114,6 @@ class AnalyzeForm(FlaskForm):
 
     github_url = StringField(
         "GitHub URL",
-        validators=[DataRequired(), URL()],
+        validators=[DataRequired(), URL(), validate_github_url],
         render_kw={"placeholder": "https://github.com/owner/repo"},
     )
-
-    def validate_github_url(self, field: StringField) -> None:
-        """Validate GitHub URL format
-
-        Args:
-            field: The GitHub URL field to validate
-
-        Raises:
-            ValidationError: If URL is not a valid GitHub repository URL
-        """
-        import re
-
-        if field.data:
-            pattern = r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$"
-            if not re.match(pattern, field.data.rstrip("/")):
-                raise ValidationError("Please enter a valid GitHub repository URL")
