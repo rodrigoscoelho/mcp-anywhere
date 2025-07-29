@@ -63,12 +63,7 @@ def init_auth(app) -> None:
     # Get passcode from config
     passcode = Config.ADMIN_PASSCODE
     if not passcode:
-        # In production, require ADMIN_PASSCODE to be set
-        if not app.config.get("DEBUG", False):
-            raise ValueError("ADMIN_PASSCODE must be set in production environment")
-
-        logger.warning("No ADMIN_PASSCODE set! Using default for development only")
-        passcode = "changeme123"  # Default for development only
+        raise ValueError("ADMIN_PASSCODE must be set in production environment")
 
     # Hash the passcode for storage
     app.config["ADMIN_PASSCODE_HASH"] = bcrypt.hashpw(passcode.encode("utf-8"), bcrypt.gensalt())

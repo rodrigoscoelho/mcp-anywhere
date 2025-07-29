@@ -36,15 +36,21 @@ class TestProviderFilterMiddleware(unittest.TestCase):
         # 2. Create a client and test tool listing
         client = Client(server)
 
-        async def _run() -> list[str]:
+        async def _run() -> tuple[list[str], str]:
             async with client:
                 tools = await client.list_tools()
-                return [tool.name for tool in tools]
+                tool_names = [tool.name for tool in tools]
+                
+                # Even though hidden_tool is not listed, it should still be callable
+                hidden_result = await client.call_tool("hidden_tool", {})
+                
+                return tool_names, hidden_result.structured_content["result"]
 
-        # 3. Execute and verify only discovery tools are visible
-        visible_tools = asyncio.run(_run())
+        # 3. Execute and verify only discovery tools are visible but all tools are callable
+        visible_tools, hidden_result = asyncio.run(_run())
         self.assertEqual(set(visible_tools), {"list_providers", "list_provider_tools"})
         self.assertNotIn("hidden_tool", visible_tools)
+        self.assertEqual(hidden_result, "This should not be visible")  # Tool still works!
 
     def test_native_prefix_handling(self) -> None:
         """Test that FastMCP handles prefixed tool calls natively without middleware intervention."""

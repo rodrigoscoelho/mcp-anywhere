@@ -61,7 +61,6 @@ class ServerForm(FlaskForm):
         choices=[
             ("npx", "Node.js (npx)"),
             ("uvx", "Python (uvx)"),
-            ("python-module", "Python Module"),
         ],
         validators=[DataRequired()],
     )
@@ -87,7 +86,7 @@ class ServerForm(FlaskForm):
         Raises:
             ValidationError: If runtime type is not valid
         """
-        allowed_types = ["npx", "uvx", "python-module"]
+        allowed_types = ["npx", "uvx"]
         if field.data not in allowed_types:
             raise ValidationError(f'Runtime type must be one of: {", ".join(allowed_types)}')
 

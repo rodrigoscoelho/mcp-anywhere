@@ -40,7 +40,7 @@ def initialize_mcp_router():
 
     - Checks for Docker daemon
     - Ensures base Docker images exist
-    - Creates/verifies system servers (like llm-sandbox)
+    - Creates/verifies system servers (like mcp-python-interpreter)
     - Rebuilds any servers that are pending or have missing images
     - Mounts all 'ready' servers to the running router
     """
@@ -66,19 +66,19 @@ def initialize_mcp_router():
             logger.error(f"Failed to ensure base images: {e}. Please check your Docker setup.")
             exit(1)
 
-        # 3. Ensure llm-sandbox server exists in the database
+        # 3. Ensure Python interpreter server exists in the database
         sandbox_server = MCPServer.query.filter_by(
-            github_url="https://github.com/vndee/llm-sandbox"
+            github_url="https://github.com/yzfly/mcp-python-interpreter"
         ).first()
         if not sandbox_server:
-            logger.info("Creating llm-sandbox system server in database.")
+            logger.info("Creating mcp-python-interpreter system server in database.")
             sandbox_server = MCPServer(
-                name="Python Sandbox",
-                github_url="https://github.com/vndee/llm-sandbox",
+                name="Python Interpreter",
+                github_url="https://github.com/yzfly/mcp-python-interpreter",
                 description="Execute Python code in a secure sandbox environment",
-                runtime_type="python-module",
-                install_command="pip install 'llm-sandbox[docker]' mcp",
-                start_command="llm_sandbox.mcp_server.server",
+                runtime_type="uvx",
+                install_command="pip install mcp-python-interpreter",
+                start_command="uvx mcp-python-interpreter --dir /data/python-sandbox",
                 is_active=True,
                 build_status="pending",
             )

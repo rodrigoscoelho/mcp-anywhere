@@ -66,7 +66,7 @@ class TestContainerManager(unittest.TestCase):
             "npm install -g --no-audit @another/package",
         )
 
-        # Python pip command
+        # Python pip command - uv is installed separately now
         server_uvx = MCPServer(
             runtime_type="uvx", install_command="pip install -r requirements.txt"
         )

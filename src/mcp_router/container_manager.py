@@ -4,7 +4,6 @@ Manages container lifecycle for MCP servers in any language.
 Supports:
 - npx: Node.js/JavaScript servers
 - uvx: Python servers
-- docker: Any language via Docker images
 """
 
 from typing import Dict, Any, Optional, List
@@ -113,7 +112,14 @@ class ContainerManager:
             else:
                 return f"npm install -g --no-audit {cmd_parts[0]}"
 
-        # For Python/uvx, return as-is since pip/uvx handle their own parsing
+        # For Python/uvx, ensure uv is installed first
+        if server.runtime_type == "uvx":
+            # For uvx servers, we need to install uv first
+            # Since SandboxSession might not handle shell operators well,
+            # we'll install uv separately in the build process
+            return cmd if cmd.strip() else ""
+        
+        # For other Python packages, return as-is since pip handles their own parsing
         return cmd
 
     def _parse_start_command(self, server: MCPServer) -> List[str]:
@@ -141,17 +147,6 @@ class ContainerManager:
                 if "stdio" not in parts:
                     parts.append("stdio")
                 return parts
-
-            elif server.runtime_type == "python-module":
-                # For python modules: "module.name" -> ["python3", "-m", "module.name"]
-                # The command should just be the module name
-                if parts[0] == "python" or parts[0] == "python3":
-                    # Already properly formatted
-                    return parts
-                else:
-                    # Just the module name, format it
-                    return ["python3", "-m"] + parts
-
             else:
                 # For other types, return parsed command as-is
                 return parts
@@ -292,9 +287,6 @@ class ContainerManager:
             elif server.runtime_type == "uvx":
                 lang = "python"
                 base_image = self.python_image
-            elif server.runtime_type == "python-module":
-                lang = "python"
-                base_image = self.python_image
             else:
                 raise ValueError(f"Unsupported runtime type: {server.runtime_type}")
 
@@ -318,6 +310,21 @@ class ContainerManager:
             ) as session:
                 # Progress logging
                 logger.info(f"Step 1/3: Setting up container for {server.name}...")
+
+                # For uvx servers, install uv first
+                if server.runtime_type == "uvx":
+                    logger.info("Installing uv for uvx server...")
+                    uv_result = session.execute_command("pip install uv")
+                    if uv_result.exit_code != 0:
+                        raise RuntimeError(f"Failed to install uv: {uv_result.stderr}")
+                    logger.info("uv installed successfully")
+
+                # Create Python sandbox directory for mcp-python-interpreter if this is a uvx server
+                if server.runtime_type == "uvx" and "mcp-python-interpreter" in server.start_command:
+                    logger.info("Creating Python sandbox directory for mcp-python-interpreter...")
+                    mkdir_result = session.execute_command("mkdir -p /data/python-sandbox && chmod 755 /data/python-sandbox")
+                    if mkdir_result.exit_code != 0:
+                        logger.warning(f"Failed to create sandbox directory: {mkdir_result.stderr}")
 
                 # Install dependencies only if install_command is not empty
                 if install_command:

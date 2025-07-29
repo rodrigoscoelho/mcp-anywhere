@@ -134,17 +134,15 @@ Based on the file contents, extract the following information. Be precise and co
 
 IMPORTANT: The servers will run in containerized environments. Provide the full, actual commands that would be used to install and run the server.
 
-1. **Runtime type**: Determine if this is 'npx' (for Node.js), 'uvx' (for Python), or 'docker'. Prioritize `pyproject.toml` for Python projects and `package.json` for Node.js projects.
+1. **Runtime type**: Determine if this is 'npx' (for Node.js) or 'uvx' (for Python). Prioritize `pyproject.toml` for Python projects and `package.json` for Node.js projects.
 
 2. **Install command**: The full command to install the package/dependencies. This command will be run during the container build process.
    - For npx packages: "npm install -g @org/package" (e.g., "npm install -g @ahrefs/mcp")
    - For uvx packages: "pip install package-name" or "pip install -e ."
-   - For docker: appropriate install commands or "none" if using a pre-built image
 
 3. **Start command**: The full command to run the server. This is the exact command you would type to start the server.
    - For npx: "npx @org/package" (e.g., "npx @ahrefs/mcp")
    - For uvx: "uvx package-name" or "python -m package"
-   - For docker: the command to start the server
 
 4. **Server name**: A short, descriptive, machine-readable name for the server (e.g., "financial-data-api").
 
@@ -154,7 +152,7 @@ IMPORTANT: The servers will run in containerized environments. Provide the full,
 
 Respond in this exact, parsable format. Do not add any conversational text or pleasantries.
 
-RUNTIME: [npx|uvx|docker]
+RUNTIME: [npx|uvx]
 INSTALL: [full install command]
 START: [full start command]
 NAME: [server name]

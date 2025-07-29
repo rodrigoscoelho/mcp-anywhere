@@ -21,7 +21,7 @@ class MCPServer(db.Model):
     name = db.Column(db.String(100), unique=True, nullable=False)
     github_url = db.Column(db.String(500), nullable=False)
     description = db.Column(db.Text)
-    runtime_type = db.Column(db.String(20), nullable=False)  # npx, uvx, docker
+    runtime_type = db.Column(db.String(20), nullable=False)  # npx, uvx
     install_command = db.Column(db.Text, nullable=False, default="")
     start_command = db.Column(db.Text, nullable=False)
     env_variables = db.Column(JSON, nullable=False, default=list)
