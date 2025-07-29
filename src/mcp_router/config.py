@@ -65,8 +65,8 @@ class Config:
 
     # Container settings
     DOCKER_HOST = os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")
-    MCP_PYTHON_IMAGE = os.environ.get("MCP_PYTHON_IMAGE", "python:3.11-alpine")
-    MCP_NODE_IMAGE = os.environ.get("MCP_NODE_IMAGE", "node:20-alpine")
+    MCP_PYTHON_IMAGE = os.environ.get("MCP_PYTHON_IMAGE", "python:3.11-slim")
+    MCP_NODE_IMAGE = os.environ.get("MCP_NODE_IMAGE", "node:20-slim")
     DOCKER_TIMEOUT = int(os.environ.get("DOCKER_TIMEOUT", "300"))  # 5 minutes default
 
     # Application settings

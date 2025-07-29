@@ -13,6 +13,10 @@ class ProviderFilterMiddleware(Middleware):
 
     - list_tools: shows only discovery tools (list_providers, list_provider_tools)
     - list_provider_tools: shows provider's tools with correct prefixes
+    
+    Note: This middleware does NOT handle tool call routing. FastMCP's native
+    mount() functionality handles prefixed tool calls automatically when the
+    mounted servers are properly configured and reachable.
     """
 
     async def on_list_tools(
@@ -41,23 +45,3 @@ class ProviderFilterMiddleware(Middleware):
 
         logger.info(f"Filtered tools list to {len(discovery_tools)} discovery tools")
         return discovery_tools
-
-    async def on_call_tool(
-        self,
-        ctx: MiddlewareContext,
-        call_next: Callable[[MiddlewareContext], Awaitable[Dict[str, Any]]],
-    ) -> Dict[str, Any]:
-        """
-        Handle tool calls, logging for debugging purposes.
-
-        Since tools are already mounted with their full prefixed names
-        (e.g., "d2107d3d_execute_code"), we don't need to modify the
-        tool names - FastMCP's routing will handle them correctly.
-        """
-        # Just log the tool call for debugging
-        # The actual tool name is embedded in the JSON-RPC request,
-        # but we don't need to modify it since FastMCP handles routing
-        logger.debug("Processing tool call through middleware")
-
-        # Pass through to the next handler without modification
-        return await call_next(ctx)

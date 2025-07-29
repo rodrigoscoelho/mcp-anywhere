@@ -305,6 +305,7 @@ class ContainerManager:
             with SandboxSession(
                 lang=lang,
                 image=base_image,
+                client=self.docker_client,
                 keep_template=True,
                 commit_container=True,
                 docker_host=self.docker_host,
