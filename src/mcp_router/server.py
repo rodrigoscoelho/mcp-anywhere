@@ -1,9 +1,13 @@
 """FastMCP server implementation for MCP Router using proxy pattern"""
 
+import asyncio
+
+
 from typing import List, Dict, Any, Optional
 from fastmcp import FastMCP
-from mcp_router.middleware import ProviderFilterMiddleware
-from mcp_router.models import get_active_servers, MCPServer
+from sqlalchemy.exc import SQLAlchemyError, DatabaseError
+from mcp_router.middleware import ToolFilterMiddleware
+from mcp_router.models import get_active_servers, MCPServer, MCPServerTool, db
 from mcp_router.app import app, run_web_ui_in_background
 from mcp_router.container_manager import ContainerManager
 from mcp_router.logging_config import get_logger
@@ -64,6 +68,55 @@ def create_mcp_config(servers: List[MCPServer]) -> Dict[str, Any]:
     return config
 
 
+
+def store_server_tools(server_config: MCPServer, discovered_tools: List[Dict[str, Any]]) -> None:
+    """
+    Store discovered tools in the database.
+    
+    Args:
+        server_config: The MCPServer configuration
+        discovered_tools: List of tool definitions
+    """
+    try:
+        with app.app_context():
+            
+
+            # Update database to match the discovered tools while perserving other model fields
+            existing_tools = {tool.tool_name: tool.to_dict() for tool in MCPServerTool.query.filter_by(server_id=server_config.id).all()}
+
+            discovered_tools_dict = {tool['name']: tool for tool in discovered_tools}
+
+            #set of tools to add
+            tools_to_add = discovered_tools_dict.keys() - existing_tools.keys()
+
+            #set of tools to remove
+            tools_to_remove = existing_tools.keys() - discovered_tools_dict.keys()
+
+            #add new tools
+            for tool_name in tools_to_add:
+                db.session.add(MCPServerTool(server_id=server_config.id, tool_name=tool_name, tool_description=discovered_tools_dict[tool_name]['description'], is_enabled=True))
+            logger.info(f"Added {len(tools_to_add)} tools for server '{server_config.name}'")
+            
+            #remove tools
+            for tool_name in tools_to_remove:
+                tool = MCPServerTool.query.filter_by(server_id=server_config.id, tool_name=tool_name).first()
+                db.session.delete(tool)
+            logger.info(f"Removed {len(tools_to_remove)} tools for server '{server_config.name}'")
+
+
+            db.session.commit()
+            logger.info(f"Stored {len(discovered_tools_dict)} tools for server '{server_config.name}'")
+
+
+    except (SQLAlchemyError, DatabaseError) as e:
+        logger.error(f"Database error storing tools for {server_config.name}: {e}")
+        # Don't raise here to avoid breaking server mounting
+    except (KeyError, TypeError) as e:
+        logger.error(f"Data format error storing tools for {server_config.name}: {e}")
+        # Don't raise here to avoid breaking server mounting
+
+
+
 class DynamicServerManager:
     """
     Manages dynamic addition and removal of MCP servers using FastMCP's mount() capability.
@@ -83,6 +136,7 @@ class DynamicServerManager:
         self.mounted_servers: Dict[str, FastMCP] = {}
         self.server_descriptions: Dict[str, str] = {}
         logger.info("Initialized DynamicServerManager")
+
 
     def add_server(self, server_config: MCPServer) -> None:
         """
@@ -113,11 +167,17 @@ class DynamicServerManager:
                 f"Successfully mounted server '{server_config.name}' with prefix '{prefix}'"
             )
 
+            # Discover and store tools for this newly added server
+            logger.info(f"Updating tools for server '{server_config.name}'")
+            self._update_server_tools(server_config)
+            logger.info(f"Updated tools for server '{server_config.name}'")
+
         except Exception as e:
             logger.error(f"Failed to add server '{server_config.name}': {e}")
             # Continue with other servers rather than raising
 
-    def remove_server(self, server_name: str) -> None:
+
+    def remove_server(self, server_id: str) -> None:
         """
         Remove an MCP server dynamically by unmounting it from all managers.
 
@@ -127,13 +187,13 @@ class DynamicServerManager:
         Args:
             server_name: Name of the server to remove
         """
-        if server_name not in self.mounted_servers:
-            logger.warning(f"Server '{server_name}' not found in mounted servers")
+        if server_id not in self.mounted_servers:
+            logger.warning(f"Server '{server_id}' not found in mounted servers")
             return
 
         try:
             # Get the mounted server proxy
-            mounted_server = self.mounted_servers[server_name]
+            mounted_server = self.mounted_servers[server_id]
 
             # Remove from all FastMCP internal managers
             # Based on FastMCP developer's example in issue #934
@@ -153,29 +213,73 @@ class DynamicServerManager:
             # Clear the router cache to ensure changes take effect
             self.router._cache.clear()
 
-            # Remove from our tracking
-            del self.mounted_servers[server_name]
-            del self.server_descriptions[server_name]
+            # Remove the tools for the server
+            self._remove_server_tools(server_id)
 
-            logger.info(f"Successfully unmounted server '{server_name}' from all managers")
+            # Remove from our tracking
+            del self.mounted_servers[server_id]
+            del self.server_descriptions[server_id]
+
+            logger.info(f"Successfully unmounted server '{server_id}' from all managers")
 
         except Exception as e:
-            logger.error(f"Failed to remove server '{server_name}': {e}")
+            logger.error(f"Failed to remove server '{server_id}': {e}")
             raise
 
-    # TODO: This is not used anywhere, remove it?
-    def get_providers(self) -> List[Dict[str, str]]:
+    
+    def _update_server_tools(self, server_config: MCPServer) -> None:
         """
-        Get list of providers with descriptions.
+        Update the tools for a server.
 
-        Returns:
-            List of dictionaries containing provider name and description
+        Args:
+            server_config: The MCPServer configuration
+
         """
-        providers = [
-            {"name": name, "description": desc} for name, desc in self.server_descriptions.items()
-        ]
-        logger.debug(f"Returning {len(providers)} providers")
-        return providers
+
+        async def _get_tools():
+            return await self.mounted_servers[server_config.id]._tool_manager.get_tools()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            tools = loop.run_until_complete(_get_tools())
+        finally:
+            loop.close()
+
+        logger.info(f"Discovered tools1: {tools}")
+
+
+
+        # Find tools that belong to this server
+        discovered_tools = []
+        for key, tool in tools.items():
+            discovered_tools.append({
+                'name': key,
+                'description': tool.description or ''
+            })
+
+
+        store_server_tools(server_config, discovered_tools)
+
+        logger.info(f"Updated tools for server '{server_config.name}'")
+
+
+    def _remove_server_tools(self, server_id: str) -> None:
+        """
+        Remove the tools for a server.
+
+        Args:
+            server_name: The name of the server to remove
+        """
+        with app.app_context():
+            MCPServerTool.query.filter_by(server_id=server_id).delete()
+            db.session.commit()
+
+            logger.info(f"Removed tools for server '{server_id}'")
+
+
+
+
 
 
 # Global reference to the dynamic manager for access from routes
@@ -232,12 +336,9 @@ def create_router(
         auth=auth,
         instructions="""This router provides access to multiple MCP servers and a Python sandbox.
 
-Use 'list_providers' to see available servers, then use tools/list with a provider parameter.
+All tools from mounted servers are available directly with prefixed names.
 
-Example workflow:
-1. Call list_providers() to see available servers
-2. Call tools/list with provider="server_name" to see that server's tools
-3. Call tools with provider="server_name" parameter to execute them
+You can use tools/list to see all available tools from all mounted servers.
 """,
     )
 
@@ -270,61 +371,19 @@ Example workflow:
                 server.description or "No description provided"
             )
 
+            _dynamic_manager._update_server_tools(server)
+
             logger.info(f"Successfully mounted server '{server.name}' with prefix '{server.id}'")
+
+            # Tool discovery will be handled after all servers are mounted
 
         except Exception as e:
             logger.error(f"Failed to mount server '{server.name}' during initialization: {e}")
             continue
 
-    @router.tool()
-    def list_providers() -> List[Dict[str, str]]:
-        """
-        List all available MCP servers.
 
-        Returns:
-            List of providers with id, name, and description
-        """
-        with app.app_context():
-            servers = get_active_servers()
-            return [
-                {
-                    "id": server.id,  # Already 8 chars
-                    "name": server.name,
-                    "description": server.description or f"MCP server: {server.name}",
-                }
-                for server in servers
-            ]
-
-    @router.tool()
-    async def list_provider_tools(provider_id: str) -> List[Dict[str, Any]]:
-        """
-        Get tools for a specific provider.
-
-        Args:
-            provider_id: 8-character server ID
-
-        Returns:
-            List of tool definitions WITH provider prefix for correct routing
-        """
-        # Get all tools from the router
-        tools = await router._tool_manager.get_tools()
-        provider_tools = []
-
-        # Find tools that belong to this provider
-        prefix = f"{provider_id}_"
-        for key, tool in tools.items():
-            if key.startswith(prefix):
-                # Keep the prefixed name so clients know how to call the tool
-                tool_def = tool.to_mcp_tool(name=key)
-                provider_tools.append(tool_def)
-
-        if not provider_tools:
-            logger.warning(f"No tools found for provider {provider_id}")
-
-        return provider_tools
-
-    # Add the middleware for hierarchical discovery
-    router.add_middleware(ProviderFilterMiddleware())
+    # Add the middleware for tool filtering based on database settings
+    router.add_middleware(ToolFilterMiddleware())
 
     return router
 

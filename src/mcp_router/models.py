@@ -57,6 +57,39 @@ class MCPServer(db.Model):
         }
 
 
+class MCPServerTool(db.Model):
+    """Model for MCP server tools"""
+    
+    __tablename__ = "mcp_server_tools"
+    
+    id = db.Column(db.Integer, primary_key=True)
+    server_id = db.Column(db.String(8), db.ForeignKey('mcp_servers.id'), nullable=False)
+    tool_name = db.Column(db.String(200), nullable=False)
+    tool_description = db.Column(db.Text)
+    is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Relationship
+    server = db.relationship('MCPServer', backref='tools')
+    
+    # Unique constraint to prevent duplicate tools per server
+    __table_args__ = (db.UniqueConstraint('server_id', 'tool_name'),)
+    
+    def __repr__(self) -> str:
+        return f"<MCPServerTool {self.server_id}_{self.tool_name}>"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "id": self.id,
+            "server_id": self.server_id,
+            "tool_name": self.tool_name,
+            "tool_description": self.tool_description,
+            "is_enabled": self.is_enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class MCPServerStatus(db.Model):
     """Model to track MCP server runtime status"""
 
@@ -168,6 +201,17 @@ def init_db(app) -> None:
                     text("ALTER TABLE mcp_servers ADD COLUMN image_tag VARCHAR(200)")
                 )
                 db.session.commit()
+
+            # Check if mcp_server_tools table exists and create if needed
+            try:
+                result = db.session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='mcp_server_tools'")).fetchone()
+                if not result:
+                    logger.info("Creating mcp_server_tools table")
+                    # Create the table using SQLAlchemy metadata
+                    MCPServerTool.__table__.create(db.engine)
+                    logger.info("Successfully created mcp_server_tools table")
+            except Exception as table_error:
+                logger.error(f"Error creating mcp_server_tools table: {table_error}")
 
         except Exception as e:
             logger.error(f"Error during database migration: {e}")

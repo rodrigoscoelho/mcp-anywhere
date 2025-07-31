@@ -1,84 +1,108 @@
-"""Middleware for hierarchical tool discovery in MCP Router"""
+"""Middleware for tool filtering based on database enable/disable status in MCP Router"""
 
-from typing import Dict, Any, Callable, Awaitable
+from typing import Dict, Any, Callable, Awaitable, Set, List
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.tools import Tool
 from mcp_router.logging_config import get_logger
+from mcp_router.models import MCPServerTool, db
+from mcp_router.app import app
 
 logger = get_logger(__name__)
 
 
-class ProviderFilterMiddleware(Middleware):
+class ToolFilterMiddleware(Middleware):
     """
-    Middleware that implements hierarchical tool discovery.
-
-    - list_tools: shows only discovery tools (list_providers, list_provider_tools)
-    - list_provider_tools: shows provider's tools with correct prefixes
-
-    Note: This middleware does NOT handle tool call routing. FastMCP's native
-    mount() functionality handles prefixed tool calls automatically when the
-    mounted servers are properly configured and reachable.
+    Middleware that filters tools based on database enable/disable status.
+    
+    This middleware queries the database to check which tools are disabled
+    and filters them out from the tools/list response while preserving
+    the prefixed tool names for correct routing.
     """
 
-    async def on_message(
+    async def on_list_tools(
         self,
         ctx: MiddlewareContext,
-        call_next: Callable[[MiddlewareContext], Awaitable[Any]],
-    ) -> Any:
+        call_next: Callable[[MiddlewareContext], Awaitable[List[Tool]]],
+    ) -> List[Tool]:
         """
-        Intercept all JSON-RPC messages and filter tool listings.
+        Intercept the tools/list request and filter the results.
 
-        Based on FastMCP middleware documentation, we use on_message to intercept
-        all messages and filter responses without breaking tool registration.
+        Args:
+            ctx: The middleware context
+            call_next: The next handler in the chain
+
+        Returns:
+            A list of enabled tools.
         """
-        # Process the request normally
-        result = await call_next(ctx)
+        all_tools = await call_next(ctx)
+        logger.debug("Intercepting tools/list response to filter disabled tools")
 
-        # Only filter the response for tools/list method
-        if ctx.method == "tools/list":
-            logger.info("Intercepting tools/list response to filter discovery tools")
+        disabled_prefixed_tools = self._get_disabled_tools()
+        if not disabled_prefixed_tools:
+            logger.debug("No disabled tools found, returning all tools")
+            return all_tools
 
-            # For tools/list, the result is typically a list of tool objects
-            if isinstance(result, list):
-                all_tools = result
+        enabled_tools = [
+            tool
+            for tool in all_tools
+            if not self._is_tool_disabled(tool, disabled_prefixed_tools)
+        ]
 
-                # Filter to only show discovery tools
-                discovery_tools = [
-                    tool
-                    for tool in all_tools
-                    if hasattr(tool, "name")
-                    and tool.name in ["list_providers", "list_provider_tools"]
-                ]
+        logger.info(
+            f"Filtered tools list from {len(all_tools)} to {len(enabled_tools)} enabled tools"
+        )
+        return enabled_tools
 
-                logger.info(
-                    f"Filtered tools list from {len(all_tools)} to {len(discovery_tools)} discovery tools"
-                )
+    def _get_disabled_tools(self) -> Set[str]:
+        """
+        Query the database for disabled tools and return their prefixed names.
+        
+        Returns:
+            Set of prefixed tool names that are disabled
+        """
+        try:
+            disabled_prefixed_tools = set()
+            
+            with app.app_context():
+                # Query for disabled tools
+                disabled_tools = db.session.query(
+                    MCPServerTool.server_id,
+                    MCPServerTool.tool_name
+                ).filter_by(is_enabled=False).all()
+                
+                # Create prefixed tool names
+                for server_id, tool_name in disabled_tools:
+                    prefixed_name = f"{server_id}_{tool_name}"
+                    disabled_prefixed_tools.add(prefixed_name)
+                
+                logger.debug(f"Found {len(disabled_prefixed_tools)} disabled tools in database")
+                
+            return disabled_prefixed_tools
+            
+        except Exception as e:
+            logger.error(f"Failed to query disabled tools from database: {e}")
+            return set()
 
-                # Return filtered list
-                return discovery_tools
-            elif isinstance(result, dict) and "tools" in result:
-                # Alternative response format
-                all_tools = result["tools"]
-
-                # Filter to only show discovery tools
-                discovery_tools = [
-                    tool
-                    for tool in all_tools
-                    if (
-                        isinstance(tool, dict)
-                        and tool.get("name") in ["list_providers", "list_provider_tools"]
-                    )
-                    or (
-                        hasattr(tool, "name")
-                        and tool.name in ["list_providers", "list_provider_tools"]
-                    )
-                ]
-
-                logger.info(
-                    f"Filtered tools list from {len(all_tools)} to {len(discovery_tools)} discovery tools"
-                )
-
-                # Return modified result
-                result["tools"] = discovery_tools
-                return result
-
-        return result
+    def _is_tool_disabled(self, tool: Any, disabled_tools: Set[str]) -> bool:
+        """
+        Check if a tool is disabled based on its name.
+        
+        Args:
+            tool: The tool object from the tools/list response
+            disabled_tools: Set of disabled prefixed tool names
+            
+        Returns:
+            True if the tool is disabled, False otherwise
+        """
+        # Get tool name from different possible formats
+        tool_name = None
+        if hasattr(tool, "name"):
+            tool_name = tool.name
+        elif isinstance(tool, dict) and "name" in tool:
+            tool_name = tool["name"]
+        
+        if tool_name and tool_name in disabled_tools:
+            logger.debug(f"Tool '{tool_name}' is disabled, filtering out")
+            return True
+            
+        return False

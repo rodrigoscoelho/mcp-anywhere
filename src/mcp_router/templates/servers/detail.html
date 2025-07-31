@@ -91,6 +91,48 @@
             </div>
             {% endif %}
 
+            <!-- Available Tools -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h3 class="text-lg font-medium mb-4">Available Tools</h3>
+                
+                {% if server.tools %}
+                <div class="space-y-3">
+                    {% for tool in server.tools %}
+                    <div class="flex items-start justify-between p-3 border rounded-md">
+                        <div class="flex-1">
+                            <div class="flex items-center">
+                                <input type="checkbox" 
+                                       id="tool_{{ tool.id }}"
+                                       {% if tool.is_enabled %}checked{% endif %}
+                                       onchange="toggleToolStatus(this, '{{ tool.id }}', '{{ server.id }}')"
+                                       class="mr-3 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                <label for="tool_{{ tool.id }}" class="font-mono text-sm font-medium cursor-pointer">
+                                    {{ tool.tool_name }}
+                                </label>
+                            </div>
+                            {% if tool.tool_description %}
+                                <p class="text-xs text-gray-600 mt-1 ml-7">{{ tool.tool_description }}</p>
+                            {% endif %}
+                        </div>
+                        <div id="tool_status_{{ tool.id }}" class="ml-4">
+                            <span class="text-xs px-2 py-1 rounded {% if tool.is_enabled %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+                                {% if tool.is_enabled %}Enabled{% else %}Disabled{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-8">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    <p class="mt-2 text-sm text-gray-500">No tools have been discovered for this server yet.</p>
+                    <p class="text-xs text-gray-400">Tools are discovered when the server is mounted and running.</p>
+                </div>
+                {% endif %}
+            </div>
+
         </div>
 
         <!-- Actions Sidebar -->
@@ -155,4 +197,32 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+function toggleToolStatus(checkbox, toolId, serverId) {
+    // Update the status label immediately based on checkbox state
+    const statusElement = document.getElementById(`tool_status_${toolId}`);
+    const isEnabled = checkbox.checked;
+    
+    if (statusElement) {
+        const statusText = isEnabled ? 'Enabled' : 'Disabled';
+        const statusClass = isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700';
+        
+        statusElement.innerHTML = `<span class="text-xs px-2 py-1 rounded ${statusClass}">${statusText}</span>`;
+    }
+    
+    // Send HTMX request to update the backend
+    htmx.ajax('POST', `/servers/${serverId}/toggle-tool`, {
+        values: {
+            'tool_id': toolId,
+            'enabled': isEnabled ? 'true' : 'false'
+        },
+        target: `#tool_status_${toolId}`,
+        swap: 'none'  // Don't swap content since we already updated it
+    });
+}
+</script>
 {% endblock %} 

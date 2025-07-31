@@ -13,7 +13,7 @@ from flask import (
 )
 from flask_login import login_required
 from sqlalchemy.exc import IntegrityError
-from mcp_router.models import db, MCPServer
+from mcp_router.models import db, MCPServer, MCPServerTool
 from mcp_router.forms import ServerForm, AnalyzeForm
 from mcp_router.container_manager import ContainerManager
 from mcp_router.claude_analyzer import ClaudeAnalyzer
@@ -54,12 +54,12 @@ def handle_dynamic_server_update(server: MCPServer, operation: str = "add") -> N
             logger.info(f"Completed dynamic addition of server '{server.name}'")
 
         elif operation == "delete":
-            dynamic_manager.remove_server(server.name)
+            dynamic_manager.remove_server(server.id)
             logger.info(f"Completed dynamic removal of server '{server.name}'")
 
         elif operation == "update":
             # For updates, remove and re-add
-            dynamic_manager.remove_server(server.name)
+            dynamic_manager.remove_server(server.id)
             dynamic_manager.add_server(server)
             logger.info(f"Completed dynamic update of server '{server.name}'")
 
@@ -349,6 +349,50 @@ def toggle_server(server_id: str) -> Union[Response, Tuple[str, int]]:
         flash("Error updating server status.", "error")
 
     return redirect(url_for("servers.server_detail", server_id=server.id))
+
+
+@servers_bp.route("/servers/<server_id>/toggle-tool", methods=["POST"])
+@login_required
+def toggle_tool(server_id: str) -> str:
+    """
+    Toggle enable/disable status of a tool (HTMX endpoint).
+    
+    Args:
+        server_id: ID of the server
+        
+    Returns:
+        HTML string with updated tool status
+    """
+    server = MCPServer.query.get_or_404(server_id)
+    tool_id = request.form.get('tool_id')
+    enabled = request.form.get('enabled') == 'true'
+    
+    if not tool_id:
+        return '<div class="text-red-600">Error: Missing tool ID</div>'
+    
+    try:
+        tool = MCPServerTool.query.filter_by(
+            id=tool_id,
+            server_id=server_id
+        ).first_or_404()
+        
+        tool.is_enabled = enabled
+        db.session.commit()
+        
+        status_text = "Enabled" if enabled else "Disabled"
+        status_class = "bg-green-100 text-green-700" if enabled else "bg-gray-100 text-gray-700"
+        
+        logger.info(f"Tool '{tool.tool_name}' for server '{server.name}' {status_text.lower()}")
+        
+        return f'''
+        <span class="text-xs px-2 py-1 rounded {status_class}">
+            {status_text}
+        </span>
+        '''
+        
+    except Exception as e:
+        logger.error(f"Failed to toggle tool: {e}")
+        return '<div class="text-red-600">Error updating tool status</div>'
 
 
 @servers_bp.route("/api/servers/<server_id>/test", methods=["POST"])
