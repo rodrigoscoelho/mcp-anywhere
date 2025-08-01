@@ -159,4 +159,11 @@ logs/
 .cursorrules
 .cursorignore
 project.md
-
+.aider*
+locomotive-service.json
+data/
+.claude/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.vscode/
