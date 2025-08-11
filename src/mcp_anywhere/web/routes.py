@@ -756,8 +756,18 @@ async def favicon(request: Request):
     return Response(status_code=204)
 
 
+async def health(request: Request) -> Response:
+    """Lightweight health check endpoint.
+
+    Returns:
+        Response: Plain text "ok" with HTTP 200 status.
+    """
+    return Response(content="ok", media_type="text/plain", status_code=200)
+
+
 routes = [
     Route("/", endpoint=homepage),
+    Route("/health", endpoint=health, methods=["GET"]),
     Route("/favicon.ico", endpoint=favicon, methods=["GET"]),
     Route("/servers/add", endpoint=add_server, methods=["GET", "POST"]),
     Route("/servers/{server_id}", endpoint=server_detail, methods=["GET"]),

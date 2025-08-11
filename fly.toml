@@ -46,10 +46,10 @@ kill_timeout = '5s'
 
   # Health check to ensure the application is responding
   [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
+    grace_period = "60s"
+    interval = "10s"
     method = "GET"
-    timeout = "10s"
+    timeout = "15s"
     path = "/health"
     headers = {}
 

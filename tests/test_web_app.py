@@ -53,3 +53,16 @@ async def test_static_files_route(app: Starlette):
     ) as client:
         response = await client.get("/static/style.css")
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint(app: Starlette):
+    """
+    Tests that the /health endpoint responds with 200 quickly.
+    """
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/health")
+        assert response.status_code == 200
+        assert response.text == "ok"

@@ -14,12 +14,12 @@ set -e
 dockerd-entrypoint.sh &
 
 # Wait for the Docker socket to be available.
-# We'll poll for a maximum of 20 seconds.
+# We'll poll for a maximum of 90 seconds.
 echo "Waiting for Docker daemon to start..."
 counter=0
 while [ ! -S /var/run/docker.sock ]; do
-  if [ $counter -ge 20 ]; then
-    echo "Docker daemon failed to start in 20 seconds."
+  if [ $counter -ge 90 ]; then
+    echo "Docker daemon failed to start in 90 seconds."
     exit 1
   fi
   sleep 1
