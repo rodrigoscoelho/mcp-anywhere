@@ -147,34 +147,12 @@ Client Application → MCP Anywhere Gateway → Docker Containers → MCP Tools
 
 Areas for contribution:
 
-### Authentication Enhancement
-**Implemented:**
-- MCP SDK OAuth 2.0 with PKCE support
+- Oauth review and additional provider support
+- Container efficiency and latency
+- Improve tests
+- Documentation
 
-**Needed:**
-- Refresh token implementation
-- Additional OAuth provider integrations
-- Production-grade token storage (Redis/PostgreSQL)
 
-### Performance and Scaling
-**Implemented:**
-- Asynchronous Starlette/FastAPI architecture
-- Container health monitoring and remounting
-
-**Needed:**
-- WebSocket support for real-time updates
-- Container pooling for improved startup times
-- Multi-region deployment capabilities
-
-### Container Optimization
-**Implemented:**
-- Container reuse with health checks
-- Docker isolation with resource limits
-
-**Needed:**
-- Multi-architecture support (ARM64)
-- Container registry caching
-- Advanced resource monitoring
 
 ## Configuration
 
