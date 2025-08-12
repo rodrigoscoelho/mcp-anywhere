@@ -16,7 +16,8 @@ kill_timeout = '5s'
   DOCKER_HOST = 'unix:///var/run/docker.sock'
   WEB_PORT = '8000'
   MCP_PATH = '/mcp'
-  LOG_LEVEL = 'INFO'
+  LOG_LEVEL = 'DEBUG'
+  SERVER_URL = 'https://mcp-anywhere.fly.dev'
 
 [[mounts]]
   source = 'mcp_anywhere_data'
