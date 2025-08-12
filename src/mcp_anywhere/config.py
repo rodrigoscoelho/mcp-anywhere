@@ -38,7 +38,7 @@ class Config:
     WEB_PORT = int(os.environ.get("WEB_PORT", str(DEFAULT_PORT)))
 
     # JWT settings for OAuth
-    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", SECRET_KEY)
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-key-change-in-production")
 
     # Database settings
     SQLALCHEMY_DATABASE_URI = os.environ.get(
