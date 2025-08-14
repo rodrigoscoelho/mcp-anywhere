@@ -164,8 +164,7 @@ class MCPManager:
                     manager._mounted_servers.remove(mount)
                     logger.debug(f"Removed mount from {manager.__class__.__name__}")
 
-            # Clear the router cache to ensure changes take effect
-            self.router._cache.clear()
+            # FastMCP handles cache management internally
 
             # Remove from our tracking
             del self.mounted_servers[server_id]

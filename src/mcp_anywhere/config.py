@@ -29,6 +29,7 @@ class Config:
 
     # Session settings
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+    SESSION_MAX_AGE = int(os.environ.get("SESSION_MAX_AGE", "28800"))  # 8 hours default
 
     # Server settings
     DEFAULT_HOST = os.environ.get("DEFAULT_HOST", "0.0.0.0")

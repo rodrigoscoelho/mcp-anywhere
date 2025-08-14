@@ -260,14 +260,19 @@ async def edit_server_post(request: Request) -> HTMLResponse:
                 # Re-add server to MCP manager and get updated tools
                 mcp_manager = get_mcp_manager(request)
                 if mcp_manager:
-                    # Remove old server first
-                    mcp_manager.remove_server(server.id)
+                    # Remove old server first (ignore errors - server might not exist)
+                    try:
+                        mcp_manager.remove_server(server.id)
+                    except Exception as e:
+                        logger.warning(f"Failed to remove old server {server.id}: {e}")
+                    
                     # Clean up any existing container before re-adding
                     container_name = container_manager._get_container_name(server.id)
                     container_manager._cleanup_existing_container(container_name)
                     # Add updated server and discover tools
                     discovered_tools = await mcp_manager.add_server(server)
                     await store_server_tools(db_session, server, discovered_tools)
+                    await db_session.commit()
 
                 logger.info(f'Server "{server.name}" rebuilt successfully after edit!')
 
@@ -751,12 +756,12 @@ async def edit_server(request: Request):
         return await edit_server_post(request)
 
 
-async def favicon(request: Request):
+async def favicon(_request: Request):
     """Handle favicon.ico requests with a 204 No Content response to silence 404s."""
     return Response(status_code=204)
 
 
-async def health(request: Request) -> Response:
+async def health(_request: Request) -> Response:
     """Lightweight health check endpoint.
 
     Returns:
