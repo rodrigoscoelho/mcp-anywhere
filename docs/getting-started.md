@@ -120,7 +120,7 @@ Once you've reviewed the configuration, click **"Add Server"** at the bottom rig
 Once added, servers appear on your homescreen showing:
 
 <div class="screenshot-container">
-  <img src="../assets/MCP Anywhere View Server 1.PNG" alt="Server Dashboard">
+  <img src="../assets/MCP Anywhere Homescreen.PNG" alt="Server Dashboard">
 </div>
 
 - **Server Status**: Active/inactive status
@@ -155,6 +155,10 @@ Click on any server to view comprehensive details and manage its tools:
 ### Tool Management
 
 **Available Tools Section** shows each individual tool provided by the MCP server:
+
+<div class="screenshot-container">
+  <img src="../assets/MCP Anywhere View Server 1.PNG" alt="Detailed Server Tools">
+</div>
 
 - **Individual Control**: Toggle each tool on/off independently
 - **Tool Prefixes**: Each server gets a unique prefix (e.g., `0123abcd`) 
