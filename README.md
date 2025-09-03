@@ -112,7 +112,7 @@ MCP Anywhere supports secure upload and management of credential files for MCP s
 5. The file will be automatically mounted when the container starts
 
 **Security Considerations:**
-- Files are stored encrypted in `/app/secrets/<server_id>/`
+- Files are stored encrypted in `DATA_DIR/secrets/<server_id>/`
 - Each server has isolated secret storage
 - Files are only decrypted when mounting to containers
 - Container access is read-only

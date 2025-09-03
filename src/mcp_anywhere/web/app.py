@@ -20,12 +20,12 @@ from mcp_anywhere.database import close_db, get_async_session, init_db
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.web import routes
 from mcp_anywhere.web.config_routes import config_routes
-from mcp_anywhere.web.secret_routes import secret_file_routes
 from mcp_anywhere.web.middleware import (
     MCPAuthMiddleware,
     RedirectMiddleware,
     SessionAuthMiddleware,
 )
+from mcp_anywhere.web.secret_routes import secret_file_routes
 
 logger = get_logger(__name__)
 
