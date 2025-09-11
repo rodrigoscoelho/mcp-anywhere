@@ -63,6 +63,7 @@ https://github.com/modelcontextprotocol/servers
 ```
 
 MCP Anywhere will:
+
 1. Analyze the repository using Claude AI
 2. Detect runtime requirements (Node.js, Python, Docker) 
 3. Configure environment variables and API keys
@@ -110,4 +111,5 @@ Ready to get started? Follow our simple setup guide:
 ---
 
 **Current Version**: 0.8.0 (Beta)  
-**License**: See [LICENSE](https://github.com/locomotive-agency/mcp-anywhere/blob/main/LICENSE)
+**License**: See [LICENSE](https://github.com/locomotive-agency/mcp-anywhere/blob/main/LICENSE)  
+**Brought to you by**: [LOCOMOTIVE Agency](https://locomotive.agency)
