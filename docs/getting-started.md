@@ -4,7 +4,7 @@ Get up and running with MCP Anywhere in a few simple steps.
 
 ## Prerequisites
 
-- Python 3.9 or higher
+- Python 3.11 or higher
 - Docker Desktop (for running MCP servers)
 - An Anthropic API key for Claude AI (for auto-configuration)
 
@@ -36,6 +36,7 @@ Edit `.env` with your configuration:
 ```bash
 # Required
 SECRET_KEY=your-secure-random-key-here
+JWT_SECRET_KEY=your-secure-random-key-here
 ANTHROPIC_API_KEY=your-anthropic-api-key-here
 
 # Optional
@@ -52,7 +53,22 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ### 3. Start MCP Anywhere
 
+If using uv:
+
 ```bash
+# Start HTTP server (includes web UI)
+uv run mcp-anywhere serve http
+
+# Or start STDIO server (for local Claude Desktop)
+uv run mcp-anywhere serve stdio
+```
+
+Otherwise, activate your venv first:
+
+```bash
+# Activate venv
+source .venv/bin/activate
+
 # Start HTTP server (includes web UI)
 mcp-anywhere serve http
 
