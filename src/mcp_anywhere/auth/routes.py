@@ -6,7 +6,7 @@ from mcp.server.auth.routes import create_auth_routes, create_protected_resource
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from sqlalchemy import select
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
@@ -28,9 +28,12 @@ templates = Jinja2Templates(directory=str(template_dir))
 async def login_page(request: Request) -> HTMLResponse:
     """Render the login page."""
     error = request.query_params.get("error")
+    changed = request.query_params.get("changed")
     next_url = request.query_params.get("next", "")
     return templates.TemplateResponse(
-        request, "auth/login.html", {"error": error, "next_url": next_url}
+        request,
+        "auth/login.html",
+        {"error": error, "next_url": next_url, "changed": changed},
     )
 
 
@@ -196,6 +199,84 @@ async def handle_logout(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/auth/login", status_code=302)
 
 
+# Change Password handlers ---------------------------------------------------
+async def change_password_page(request: Request) -> HTMLResponse:
+    """Render the change password page (GET). Requires explicit session check."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        login_url = f"/auth/login?next={request.url}"
+        logger.info(f"User not authenticated, redirecting to login: {login_url}")
+        return RedirectResponse(url=login_url, status_code=302)
+
+    return templates.TemplateResponse(
+        request,
+        "auth/change_password.html",
+        {},  # Template will have access to request automatically
+    )
+
+
+async def handle_change_password(request: Request) -> Response:
+    """Handle change password form submission (POST)."""
+    form = await request.form()
+    current_password = form.get("current_password", "")
+    new_password = form.get("new_password", "")
+    confirm_password = form.get("confirm_password", "")
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        login_url = f"/auth/login?next={request.url}"
+        logger.info(f"User not authenticated, redirecting to login: {login_url}")
+        return RedirectResponse(url=login_url, status_code=302)
+
+    logger.info(f"Password change attempt for user_id={user_id}")
+
+    # Validate new password locally before hitting DB
+    if not new_password or not confirm_password:
+        error = "New password and confirmation are required."
+        logger.info("Password change failed: missing new/confirm password")
+        return templates.TemplateResponse(request, "auth/change_password.html", {"error": error})
+
+    if new_password != confirm_password:
+        error = "New password and confirmation do not match."
+        logger.info("Password change failed: new and confirm mismatch for user_id=%s", user_id)
+        return templates.TemplateResponse(request, "auth/change_password.html", {"error": error})
+
+    if len(new_password) < 12:
+        error = "New password must be at least 12 characters long."
+        logger.info("Password change failed: new password too short for user_id=%s", user_id)
+        return templates.TemplateResponse(request, "auth/change_password.html", {"error": error})
+
+    # Optional: reject if same as current
+    if new_password == current_password:
+        error = "New password must be different from the current password."
+        logger.info("Password change failed: new password equals current for user_id=%s", user_id)
+        return templates.TemplateResponse(request, "auth/change_password.html", {"error": error})
+
+    # Load user and verify current password
+    async with request.app.state.get_async_session() as session:
+        stmt = select(User).where(User.id == user_id)
+        user = await session.scalar(stmt)
+
+        if not user:
+            logger.warning("Password change failed: user not found in DB for user_id=%s", user_id)
+            return RedirectResponse(url="/auth/login", status_code=302)
+
+        if not user.check_password(current_password):
+            error = "Current password is incorrect."
+            logger.info("Password change failed: incorrect current password for user_id=%s", user_id)
+            return templates.TemplateResponse(request, "auth/change_password.html", {"error": error})
+
+        # All validations passed — update password
+        user.set_password(new_password)
+        session.add(user)
+        await session.commit()
+        logger.info("Password changed successfully for user_id=%s", user_id)
+
+    # Clear session to force re-login and redirect with changed flag
+    request.session.clear()
+    return RedirectResponse(url="/auth/login?changed=1", status_code=302)
+
+
 def create_oauth_http_routes(get_async_session, oauth_provider=None) -> list[Route]:
     """Create all OAuth routes using MCP SDK."""
     # Use provided provider or create new instance
@@ -240,5 +321,9 @@ def create_oauth_http_routes(get_async_session, oauth_provider=None) -> list[Rou
     mcp_routes.append(Route("/auth/consent", endpoint=consent_page, methods=["GET"]))
     mcp_routes.append(Route("/auth/consent", endpoint=handle_consent, methods=["POST"]))
     mcp_routes.append(Route("/auth/logout", endpoint=handle_logout, methods=["POST"]))
+
+    # Register change-password routes (explicit session validation inside handlers)
+    mcp_routes.append(Route("/auth/change-password", endpoint=change_password_page, methods=["GET"]))
+    mcp_routes.append(Route("/auth/change-password", endpoint=handle_change_password, methods=["POST"]))
 
     return mcp_routes
