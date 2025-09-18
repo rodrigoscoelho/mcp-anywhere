@@ -26,13 +26,12 @@ logger = get_logger(__name__)
 class AsyncClaudeAnalyzer:
     """Async version of ClaudeAnalyzer for use in async contexts."""
 
-    def __init__(
-        self, api_key: str | None = None, github_token: str | None = None
-    ) -> None:
+    def __init__(self, api_key: str | None = None, github_token: str | None = None) -> None:
+        # Do not require Anthropic API key at construction time.
+        # The analyzer will resolve the LLM provider at analysis time via the factory.
         self.api_key = api_key or Config.ANTHROPIC_API_KEY
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required for AsyncClaudeAnalyzer")
-        self.client = Anthropic(api_key=self.api_key)
+        # Lazily construct an Anthropic client only when an API key is available.
+        self.client = Anthropic(api_key=self.api_key) if self.api_key else None
         self.github_token = github_token or Config.GITHUB_TOKEN
         self.model_name = Config.ANTHROPIC_MODEL_NAME
 
@@ -55,7 +54,7 @@ class AsyncClaudeAnalyzer:
             results = await asyncio.gather(
                 readme_task, package_json_task, pyproject_task, return_exceptions=True
             )
-
+    
             # Check for critical errors (non-404 HTTP errors)
             for result in results:
                 if (
@@ -66,11 +65,16 @@ class AsyncClaudeAnalyzer:
                     raise ConnectionError(
                         f"Failed to fetch files from GitHub: {result.response.status_code}"
                     )
-
-            # Convert results, treating exceptions as None
-            readme = results[0] if not isinstance(results[0], Exception) else None
-            package_json = results[1] if not isinstance(results[1], Exception) else None
-            pyproject = results[2] if not isinstance(results[2], Exception) else None
+    
+            # Convert results, treating exceptions as None. Use a small helper to make types explicit.
+            from typing import Any
+    
+            def _as_str(val: Any) -> str | None:
+                return val if isinstance(val, str) else None
+    
+            readme = _as_str(results[0])
+            package_json = _as_str(results[1])
+            pyproject = _as_str(results[2])
 
         except ConnectionError:
             # Re-raise connection errors
@@ -90,20 +94,25 @@ class AsyncClaudeAnalyzer:
             extra={"provider": getattr(provider_instance, "provider_name", None), "model": resolved_model},
         )
 
-        # If OpenRouter provider selected, use it; otherwise preserve Anthropic flow.
-        if provider_instance and getattr(provider_instance, "provider_name", None) == PROVIDER_OPENROUTER:
-            # Convert single-prompt flow to OpenAI-like messages
+        # If a provider instance was returned by the factory, use it for chat.
+        if provider_instance:
+            # Convert single-prompt flow to OpenAI-like messages and use provider chat.
             messages = [{"role": "user", "content": prompt}]
             try:
                 analysis_text = await provider_instance.chat(messages, resolved_model)
             except Exception as e:
-                logger.exception(f"OpenRouter provider error: {e}")
-                raise ConnectionError(f"Failed to get analysis from OpenRouter: {e}")
+                logger.exception(f"LLM provider error: {e}")
+                raise ConnectionError(f"Failed to get analysis from LLM provider: {e}")
+            # Parse response assuming Claude-compatible structured text.
             return self._parse_claude_response(analysis_text)
 
-        # Default (Anthropic) path - keep original behavior for compatibility
+        # Legacy Anthropic path: provider_instance is None meaning factory chose to preserve legacy behavior.
+        # Ensure we have an Anthropic client available.
+        if not self.client:
+            raise ValueError("ANTHROPIC_API_KEY is required for legacy Anthropic analyzer path")
+
         try:
-            analysis_text = await self._call_claude_api(prompt)
+            analysis_text = await self._call_claude_api(prompt, model_name=resolved_model)
             return self._parse_claude_response(analysis_text)
         except AnthropicError as e:
             logger.exception(f"Claude API error: {e}")
@@ -114,14 +123,23 @@ class AsyncClaudeAnalyzer:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type((AnthropicError,)),
     )
-    async def _call_claude_api(self, prompt: str) -> str:
-        """Call Claude API with retry logic."""
+    async def _call_claude_api(self, prompt: str, model_name: str | None = None) -> str:
+        """Call Claude API with retry logic.
+
+        Accepts an optional model_name which overrides the instance's configured model.
+        """
+        model = model_name or self.model_name
+        if not self.client:
+            raise ValueError("Anthropic client is not configured for _call_claude_api")
+        # Ensure static analyzers understand client is not None
+        client = self.client
+
         # Run the synchronous Claude API call in a thread pool
         loop = asyncio.get_event_loop()
         message = await loop.run_in_executor(
             None,
-            lambda: self.client.messages.create(
-                model=self.model_name,
+            lambda: client.messages.create(
+                model=model,
                 max_tokens=1024,
                 temperature=0.0,
                 messages=[{"role": "user", "content": prompt}],
