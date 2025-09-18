@@ -4,8 +4,7 @@ Uses the MCP auth module for spec-compliant OAuth 2.0 flows with PKCE support.
 
 import secrets
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, AsyncContextManager, Callable
 
 from mcp.server.auth.provider import (
     AccessToken,
@@ -33,9 +32,9 @@ class MCPAnywhereAuthProvider(OAuthAuthorizationServerProvider):
     """OAuth 2.0 provider that integrates MCP SDK auth with our database with PKCE support."""
 
     def __init__(
-        self, db_session_factory: Callable[[], Awaitable[AsyncSession]]
+        self, db_session_factory: Callable[[], AsyncContextManager[AsyncSession]]
     ) -> None:
-        """Initialize with a database session factory."""
+        """Initialize with a database session factory (async context manager factory)."""
         self.db_session_factory = db_session_factory
         self.auth_codes = {}  # In-memory storage for demo, use DB in production
         self.access_tokens = {}  # Token storage
@@ -50,10 +49,10 @@ class MCPAnywhereAuthProvider(OAuthAuthorizationServerProvider):
         client_id: str,
         redirect_uri: str,
         user_id: str,
-        code_challenge: str = None,
-        code_challenge_method: str = None,
-        scopes: list[str] = None,
-        scope: str = None,
+        code_challenge: "str | None" = None,
+        code_challenge_method: "str | None" = None,
+        scopes: "list[str] | None" = None,
+        scope: "str | None" = None,
         **kwargs,  # Accept any additional parameters
     ) -> str:
         """Generate and store an authorization code with PKCE support.
@@ -199,17 +198,17 @@ class MCPAnywhereAuthProvider(OAuthAuthorizationServerProvider):
         async with self.db_session_factory() as session:
             stmt = select(OAuth2Client).where(OAuth2Client.client_id == client_id)
             db_client = await session.scalar(stmt)
-
+ 
             if not db_client:
                 logger.debug(f"Client not found in database: {client_id}")
                 return None
-
+ 
             # Convert database model to MCP SDK model and cache it
+            # Use getattr to avoid static type issues with SQLAlchemy Column descriptors
+            client_secret_val = db_client.client_secret if getattr(db_client, "is_confidential", False) else None
             client_info = OAuthClientInformationFull(
                 client_id=db_client.client_id,
-                client_secret=(
-                    db_client.client_secret if db_client.is_confidential else None
-                ),
+                client_secret=client_secret_val,
                 client_name=db_client.client_name,
                 redirect_uris=[db_client.redirect_uri],
                 grant_types=["authorization_code"],

@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, AsyncContextManager, Sequence
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -122,6 +122,10 @@ class MCPServerSecretFile(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
+    # Track last update (nullable for backward compatibility)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None, onupdate=datetime.utcnow
+    )
 
     # Relationship back to server
     server: Mapped["MCPServer"] = relationship(back_populates="secret_files")
@@ -204,10 +208,12 @@ class DatabaseManager:
 
             logger.info("Async database initialized")
 
-    def get_session(self) -> AsyncSession:
-        """Get an async database session."""
+    def get_session(self) -> AsyncContextManager[AsyncSession]:
+        """Get an async database session (async context manager)."""
         if self._session_factory is None:
             raise RuntimeError("Database not initialized. Call initialize() first.")
+        # async_sessionmaker() returns an AsyncSession instance which is also usable
+        # as an async context manager. Expose it as an AsyncContextManager for typing.
         return self._session_factory()
 
     async def close(self) -> None:
@@ -234,8 +240,8 @@ async def init_db() -> None:
     await db_manager.initialize()
 
 
-def get_async_session() -> AsyncSession:
-    """Get an async database session."""
+def get_async_session() -> AsyncContextManager[AsyncSession]:
+    """Get an async database session (async context manager)."""
     return db_manager.get_session()
 
 
@@ -245,7 +251,7 @@ async def close_db() -> None:
 
 
 # Async helper functions to replace Flask-SQLAlchemy equivalents
-async def get_active_servers(session: AsyncSession | None = None) -> list[MCPServer]:
+async def get_active_servers(session: AsyncSession | None = None) -> Sequence[MCPServer]:
     """Get all active servers (async equivalent of Flask-SQLAlchemy function)."""
     if session:
         # Use provided session
@@ -268,7 +274,7 @@ async def get_active_servers(session: AsyncSession | None = None) -> list[MCPSer
             return result.scalars().all()
 
 
-async def get_built_servers(session: AsyncSession | None = None) -> list[MCPServer]:
+async def get_built_servers(session: AsyncSession | None = None) -> Sequence[MCPServer]:
     """Get all built servers (async equivalent of Flask-SQLAlchemy function)."""
     if session:
         # Use provided session

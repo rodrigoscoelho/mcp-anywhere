@@ -67,10 +67,14 @@ class AnthropicProvider(BaseLLMProvider):
         loop = asyncio.get_event_loop()
         try:
             # Executa a chamada síncrona do cliente num thread pool para não bloquear o loop
+            # Ensure we pass a concrete model string to the client (avoid Optional mismatch)
+            if model is None and not self.config.model_name:
+                raise ValueError("No model specified for AnthropicProvider.chat")
+            chosen_model: str = model or self.config.model_name  # type: ignore[assignment]
             message = await loop.run_in_executor(
                 None,
                 lambda: self._client.messages.create(
-                    model=model or self.config.model_name,
+                    model=chosen_model,
                     max_tokens=1024,
                     temperature=0.0,
                     messages=[{"role": "user", "content": prompt}],
