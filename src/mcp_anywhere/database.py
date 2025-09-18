@@ -146,6 +146,37 @@ class MCPServerSecretFile(Base):
         }
 
 
+class AppSetting(Base):
+    """Global application settings persisted in DB.
+
+    Schema:
+    - key (PK, text)
+    - value (text, nullable)
+    - encrypted (bool, default False)
+    - updated_at (timestamp)
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text)
+    encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<AppSetting {self.key} encrypted={self.encrypted}>"
+
+    def to_dict(self) -> dict:
+        return {
+            "key": self.key,
+            "value": self.value,
+            "encrypted": self.encrypted,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class DatabaseManager:
     """Manages database engine and session factory lifecycle."""
 

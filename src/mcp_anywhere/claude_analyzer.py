@@ -14,6 +14,9 @@ from tenacity import (
     wait_exponential,
 )
 
+# LLM provider factory (supports Anthropic and OpenRouter)
+from mcp_anywhere.llm.factory import get_provider_and_model, PROVIDER_OPENROUTER
+
 from mcp_anywhere.config import Config
 from mcp_anywhere.logging_config import get_logger
 
@@ -78,6 +81,27 @@ class AsyncClaudeAnalyzer:
 
         prompt = self._build_prompt(github_url, readme, package_json, pyproject)
 
+        # Resolve LLM provider and model (DB > ENV). The factory may return None
+        # as provider_instance to indicate the analyzer should keep the legacy
+        # Anthropic path (preserves existing behavior and tests).
+        provider_instance, resolved_model = await get_provider_and_model()
+        logger.debug(
+            "Resolved LLM provider",
+            extra={"provider": getattr(provider_instance, "provider_name", None), "model": resolved_model},
+        )
+
+        # If OpenRouter provider selected, use it; otherwise preserve Anthropic flow.
+        if provider_instance and getattr(provider_instance, "provider_name", None) == PROVIDER_OPENROUTER:
+            # Convert single-prompt flow to OpenAI-like messages
+            messages = [{"role": "user", "content": prompt}]
+            try:
+                analysis_text = await provider_instance.chat(messages, resolved_model)
+            except Exception as e:
+                logger.exception(f"OpenRouter provider error: {e}")
+                raise ConnectionError(f"Failed to get analysis from OpenRouter: {e}")
+            return self._parse_claude_response(analysis_text)
+
+        # Default (Anthropic) path - keep original behavior for compatibility
         try:
             analysis_text = await self._call_claude_api(prompt)
             return self._parse_claude_response(analysis_text)

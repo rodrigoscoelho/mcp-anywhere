@@ -55,11 +55,19 @@ class Config:
     # External API keys
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-
+ 
     # Claude settings
     ANTHROPIC_MODEL_NAME = os.environ.get(
         "ANTHROPIC_MODEL_NAME", "claude-sonnet-4-20250514"
     )
+ 
+    # New LLM provider/model and OpenRouter key (optional)
+    # - LLM_PROVIDER: preferred global LLM provider (e.g. "anthropic", "openrouter", "openai")
+    # - LLM_MODEL: preferred model name (e.g. "anthropic/claude-sonnet-4", "openai/gpt-5")
+    # - OPENROUTER_API_KEY: API key for OpenRouter (sensitive)
+    LLM_PROVIDER = os.environ.get("LLM_PROVIDER")
+    LLM_MODEL = os.environ.get("LLM_MODEL")
+    OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
     # MCP Server settings
     # Base path users configure (may or may not include leading/trailing slashes)

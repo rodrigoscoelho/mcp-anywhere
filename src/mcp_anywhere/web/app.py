@@ -20,6 +20,7 @@ from mcp_anywhere.database import close_db, get_async_session, init_db
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.web import routes
 from mcp_anywhere.web.config_routes import config_routes
+from mcp_anywhere.web.settings_routes import settings_routes
 from mcp_anywhere.web.middleware import (
     MCPAuthMiddleware,
     RedirectMiddleware,
@@ -114,6 +115,7 @@ You can use tools/list to see all available tools from all mounted servers.
         [
             *config_routes,
             *secret_file_routes,
+            *settings_routes,
             *routes.routes,
             # Static files mount
             Mount(
