@@ -18,6 +18,7 @@ from mcp_anywhere.settings_store import get_effective_setting
 from .base import ProviderConfig, BaseLLMProvider
 from .anthropic_provider import AnthropicProvider
 from .openrouter_provider import OpenRouterProvider
+from mcp_anywhere.settings_store import get_app_setting
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,22 @@ async def get_provider_and_model() -> Tuple[Optional[BaseLLMProvider], Optional[
 
     # Anthropic explicit
     if provider_name == PROVIDER_ANTHROPIC:
+        # If provider was not explicitly set in DB or ENV (inferred from presence of ANTHROPIC_API_KEY),
+        # preserve the legacy Anthropic path by returning (None, resolved_model) so callers
+        # continue to use their existing Anthropic client. This avoids instantiating
+        # AnthropicProvider unintentionally when no explicit configuration exists.
+        try:
+            db_provider = await get_app_setting("llm.provider")
+        except Exception:
+            db_provider = None
+
+        if not db_provider and not Config.LLM_PROVIDER:
+            logger.debug(
+                "Anthropic provider inferred (not explicitly configured); preserving legacy Anthropic path",
+                extra={"model": resolved_model},
+            )
+            return None, resolved_model
+
         api_key = await get_effective_setting("llm.anthropic_api_key")
         cfg = ProviderConfig(provider_name=PROVIDER_ANTHROPIC, model_name=resolved_model, api_key=api_key)
         provider = AnthropicProvider(cfg)

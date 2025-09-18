@@ -35,16 +35,81 @@ class ContainerManager:
     """Manages container lifecycle with language-agnostic sandbox support."""
 
     def __init__(self) -> None:
-        """Initialize container manager for MCP servers."""
+        """Initialize container manager for MCP servers.
+
+        This method attempts to create a real Docker client using environment
+        configuration. On platforms where a unix socket is not available (e.g.
+        Windows), it will try a named-pipe fallback. If no connection can be
+        established, a minimal dummy client is used so the rest of the app can
+        continue to run (container operations will be disabled and logged).
+        """
         self.docker_host = Config.DOCKER_HOST
         # Get Python image from config
         self.python_image = Config.MCP_PYTHON_IMAGE
         # Get Node.js image from config
         self.node_image = Config.MCP_NODE_IMAGE
-        # Docker client with extended timeout for large operations
-        self.docker_client: DockerClient = DockerClient.from_env(
-            timeout=Config.DOCKER_TIMEOUT
-        )
+
+        self.docker_client: Optional[DockerClient] = None
+
+        # Try to create a real Docker client from the environment first.
+        try:
+            self.docker_client = DockerClient.from_env(timeout=Config.DOCKER_TIMEOUT)
+            logger.debug("Docker client created from environment.")
+        except Exception as e:
+            # Common on Windows if DOCKER_HOST points to unix socket (AF_UNIX not present)
+            logger.warning(f"Failed to create Docker client from environment: {e}")
+
+            # Attempt Windows named pipe fallback when running on Windows
+            try:
+                import platform
+
+                if platform.system().lower() == "windows":
+                    try:
+                        # Named pipe address for Docker Desktop on Windows
+                        npipe_url = "npipe:////./pipe/docker_engine"
+                        self.docker_client = DockerClient(base_url=npipe_url, timeout=Config.DOCKER_TIMEOUT)
+                        logger.info("Docker client connected using Windows named pipe.")
+                    except Exception as e2:
+                        logger.warning(f"Windows named pipe Docker connection failed: {e2}")
+            except Exception:
+                # If platform import or check fails, continue to dummy client creation
+                pass
+
+        # If still not available, provide a minimal dummy client implementation
+        if not self.docker_client:
+            logger.warning(
+                "Docker client unavailable. Container-related features will be disabled."
+            )
+
+            # Minimal dummy objects to avoid attribute errors when docker is not available.
+            class _DummyContainers:
+                def get(self, name):
+                    raise NotFound(f"Docker not available (requested container: {name})")
+
+            class _DummyImages:
+                def get(self, name):
+                    raise ImageNotFound(name)
+
+                def pull(self, name):
+                    raise APIError(f"Docker not available (pull attempted: {name})")
+
+            class _NoDockerClient:
+                def ping(self):
+                    raise ConnectionError("Docker client not available")
+
+                def close(self):
+                    logger.debug("No-op close on dummy Docker client")
+
+                @property
+                def containers(self):
+                    return _DummyContainers()
+
+                @property
+                def images(self):
+                    return _DummyImages()
+
+            self.docker_client = _NoDockerClient()
+
         # Track containers that were reused to avoid cleanup
         self.reused_containers = set()
         # Secure file manager for handling secret files
