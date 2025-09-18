@@ -13,6 +13,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 
 from anthropic import Anthropic, AnthropicError
+from anthropic.types import TextBlock
 
 from mcp_anywhere.config import Config
 from mcp_anywhere.logging_config import get_logger
@@ -85,6 +86,12 @@ class AnthropicProvider(BaseLLMProvider):
             raise
 
         # Extrai texto da primeira content block do retorno (compat com uso atual)
-        if hasattr(message.content[0], "text"):
-            return message.content[0].text
-        return str(message.content[0])
+        content_blocks = getattr(message, "content", [])
+        if not content_blocks:
+            return ""
+
+        for block in content_blocks:
+            if isinstance(block, TextBlock):
+                return block.text
+
+        return str(content_blocks[0])

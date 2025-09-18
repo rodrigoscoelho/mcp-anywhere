@@ -45,6 +45,7 @@ class MCPServer(Base):
         String(20), nullable=False, default="pending"
     )
     build_error: Mapped[str | None] = mapped_column(Text)
+    build_logs: Mapped[str | None] = mapped_column(Text)
     image_tag: Mapped[str | None] = mapped_column(String(200))
 
     # Relationship to tools
@@ -75,6 +76,7 @@ class MCPServer(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "build_status": self.build_status,
             "build_error": self.build_error,
+            "build_logs": self.build_logs,
             "image_tag": self.image_tag,
         }
 
@@ -226,6 +228,17 @@ class DatabaseManager:
                         logger.info(
                             "Added missing column 'updated_at' to mcp_server_secret_files"
                         )
+
+                    result = await conn.execute(
+                        text("PRAGMA table_info('mcp_servers')")
+                    )
+                    rows = result.fetchall()
+                    existing_cols = [row[1] for row in rows] if rows else []
+                    if "build_logs" not in existing_cols:
+                        await conn.execute(
+                            text("ALTER TABLE mcp_servers ADD COLUMN build_logs TEXT")
+                        )
+                        logger.info("Added missing column 'build_logs' to mcp_servers")
                 except Exception:
                     # Non-critical: log and continue. If the table doesn't exist yet,
                     # create_all above will handle it.

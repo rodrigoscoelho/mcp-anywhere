@@ -9,7 +9,7 @@ import json
 import os
 import re
 import shlex
-from typing import Any, Optional
+from typing import Any, Optional, Protocol, cast
 
 import docker
 from docker import DockerClient
@@ -31,6 +31,51 @@ from mcp_anywhere.security.file_manager import SecureFileManager
 logger = get_logger(__name__)
 
 
+class DockerClientProtocol(Protocol):
+    def ping(self) -> Any:
+        ...
+
+    def close(self) -> Any:
+        ...
+
+    @property
+    def containers(self) -> Any:
+        ...
+
+    @property
+    def images(self) -> Any:
+        ...
+
+
+class _DummyContainers:
+    def get(self, name: str) -> Any:
+        raise NotFound(f"Docker not available (requested container: {name})")
+
+
+class _DummyImages:
+    def get(self, name: str) -> Any:
+        raise ImageNotFound(name)
+
+    def pull(self, name: str) -> Any:
+        raise APIError(f"Docker not available (pull attempted: {name})")
+
+
+class _NoDockerClient:
+    def ping(self) -> None:
+        raise ConnectionError("Docker client not available")
+
+    def close(self) -> None:
+        logger.debug("No-op close on dummy Docker client")
+
+    @property
+    def containers(self) -> _DummyContainers:
+        return _DummyContainers()
+
+    @property
+    def images(self) -> _DummyImages:
+        return _DummyImages()
+
+
 class ContainerManager:
     """Manages container lifecycle with language-agnostic sandbox support."""
 
@@ -49,71 +94,45 @@ class ContainerManager:
         # Get Node.js image from config
         self.node_image = Config.MCP_NODE_IMAGE
 
-        self.docker_client: Optional[DockerClient] = None
-
-        # Try to create a real Docker client from the environment first.
-        try:
-            self.docker_client = DockerClient.from_env(timeout=Config.DOCKER_TIMEOUT)
-            logger.debug("Docker client created from environment.")
-        except Exception as e:
-            # Common on Windows if DOCKER_HOST points to unix socket (AF_UNIX not present)
-            logger.warning(f"Failed to create Docker client from environment: {e}")
-
-            # Attempt Windows named pipe fallback when running on Windows
-            try:
-                import platform
-
-                if platform.system().lower() == "windows":
-                    try:
-                        # Named pipe address for Docker Desktop on Windows
-                        npipe_url = "npipe:////./pipe/docker_engine"
-                        self.docker_client = DockerClient(base_url=npipe_url, timeout=Config.DOCKER_TIMEOUT)
-                        logger.info("Docker client connected using Windows named pipe.")
-                    except Exception as e2:
-                        logger.warning(f"Windows named pipe Docker connection failed: {e2}")
-            except Exception:
-                # If platform import or check fails, continue to dummy client creation
-                pass
-
-        # If still not available, provide a minimal dummy client implementation
-        if not self.docker_client:
-            logger.warning(
-                "Docker client unavailable. Container-related features will be disabled."
-            )
-
-            # Minimal dummy objects to avoid attribute errors when docker is not available.
-            class _DummyContainers:
-                def get(self, name):
-                    raise NotFound(f"Docker not available (requested container: {name})")
-
-            class _DummyImages:
-                def get(self, name):
-                    raise ImageNotFound(name)
-
-                def pull(self, name):
-                    raise APIError(f"Docker not available (pull attempted: {name})")
-
-            class _NoDockerClient:
-                def ping(self):
-                    raise ConnectionError("Docker client not available")
-
-                def close(self):
-                    logger.debug("No-op close on dummy Docker client")
-
-                @property
-                def containers(self):
-                    return _DummyContainers()
-
-                @property
-                def images(self):
-                    return _DummyImages()
-
-            self.docker_client = _NoDockerClient()
+        self.docker_client: DockerClientProtocol = self._create_docker_client()
 
         # Track containers that were reused to avoid cleanup
         self.reused_containers = set()
         # Secure file manager for handling secret files
         self.file_manager = SecureFileManager()
+
+    def _create_docker_client(self) -> DockerClientProtocol:
+        """Initialize the Docker client, falling back to a dummy implementation."""
+        docker_client: DockerClientProtocol | None = None
+
+        try:
+            client = DockerClient.from_env(timeout=Config.DOCKER_TIMEOUT)
+            logger.debug("Docker client created from environment.")
+            docker_client = cast(DockerClientProtocol, client)
+        except Exception as e:
+            logger.warning(f"Failed to create Docker client from environment: {e}")
+
+            try:
+                import platform
+
+                if platform.system().lower() == "windows":
+                    try:
+                        npipe_url = "npipe:////./pipe/docker_engine"
+                        client = DockerClient(base_url=npipe_url, timeout=Config.DOCKER_TIMEOUT)
+                        logger.info("Docker client connected using Windows named pipe.")
+                        docker_client = cast(DockerClientProtocol, client)
+                    except Exception as e2:
+                        logger.warning(f"Windows named pipe Docker connection failed: {e2}")
+            except Exception:
+                pass
+
+        if docker_client is not None:
+            return docker_client
+
+        logger.warning(
+            "Docker client unavailable. Container-related features will be disabled."
+        )
+        return cast(DockerClientProtocol, _NoDockerClient())
 
     def _check_docker_running(self) -> bool:
         """Check if the Docker daemon is running."""
@@ -168,12 +187,12 @@ class ContainerManager:
             logger.info(f"Container {container_name} is healthy and can be reused")
             return True
 
-        except (docker.errors.NotFound, IndexError, AttributeError):
+        except (NotFound, IndexError, AttributeError):
             logger.debug(
                 f"Container {container_name} not found or has invalid image info"
             )
             return False
-        except docker.errors.APIError as e:
+        except APIError as e:
             logger.warning(f"Error checking container {container_name}: {e}")
             return False
 
