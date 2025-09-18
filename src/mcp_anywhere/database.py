@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, AsyncContextManager, Sequence
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, select
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -205,6 +205,33 @@ class DatabaseManager:
             # Create tables
             async with self._engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+
+            # Backwards-compatibility: add missing columns that weren't present
+            # in older database files (SQLite doesn't ALTER TABLE via metadata).
+            # We check for the specific column used in code and add it if missing.
+            async with self._engine.connect() as conn:
+                try:
+                    result = await conn.execute(
+                        text("PRAGMA table_info('mcp_server_secret_files')")
+                    )
+                    rows = result.fetchall()
+                    existing_cols = [row[1] for row in rows] if rows else []
+                    if "updated_at" not in existing_cols:
+                        # Add nullable updated_at column to existing table
+                        await conn.execute(
+                            text(
+                                "ALTER TABLE mcp_server_secret_files ADD COLUMN updated_at DATETIME"
+                            )
+                        )
+                        logger.info(
+                            "Added missing column 'updated_at' to mcp_server_secret_files"
+                        )
+                except Exception:
+                    # Non-critical: log and continue. If the table doesn't exist yet,
+                    # create_all above will handle it.
+                    logger.debug(
+                        "Could not inspect/alter mcp_server_secret_files table; continuing"
+                    )
 
             logger.info("Async database initialized")
 

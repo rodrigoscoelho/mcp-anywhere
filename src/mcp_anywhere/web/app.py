@@ -69,6 +69,9 @@ You can use tools/list to see all available tools from all mounted servers.
     # Initialize container manager and mount servers (skip during tests)
     import os
 
+    # Ensure variable exists even when skipping initialization (avoids UnboundLocalError in tests)
+    container_manager = None
+
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         container_manager = ContainerManager()
         await container_manager.initialize_and_build_servers()
