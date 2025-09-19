@@ -142,5 +142,8 @@ async def get_effective_setting(key: str) -> Optional[str]:
         env_value = "true" if Config.MCP_DISABLE_AUTH else "false"
         return env_value
 
+    if key == "containers.preserve":
+        return "true" if Config.MCP_PRESERVE_CONTAINERS else "false"
+
     # Unknown key - no fallback
     return None

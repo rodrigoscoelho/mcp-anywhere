@@ -47,24 +47,34 @@
                     </a>
                     {% if current_user is defined and current_user.is_authenticated %}
                     <div class="flex items-center space-x-3">
-                        <a href="/settings/api-keys" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 6h14M5 18h14"></path>
-                            </svg>
-                            API Tokens
-                        </a>
-                        <a href="/settings/security" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 2c-2.673 0-8 1.337-8 4v1h16v-1c0-2.663-5.327-4-8-4z"></path>
-                            </svg>
-                            SeguranÃ§a MCP
-                        </a>
-                        <a href="/settings/llm" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M4 6h16M4 18h16"></path>
-                            </svg>
-                            ConfiguraÃ§Ãµes LLM
-                        </a>
+                        <div class="relative">
+                            <button type="button" data-settings-toggle aria-expanded="false"
+                                    class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M10.325 4.317a1 1 0 011.35 0l1.403 1.052a1 1 0 00.933.152l1.65-.55a1 1 0 011.25.65l.55 1.65a1 1 0 00.152.933l1.052 1.403a1 1 0 010 1.35l-1.052 1.403a1 1 0 00-.152.933l.55 1.65a1 1 0 01-.65 1.25l-1.65.55a1 1 0 00-.933.152l-1.403 1.052a1 1 0 01-1.35 0l-1.403-1.052a1 1 0 00-.933-.152l-1.65.55a1 1 0 01-1.25-.65l-.55-1.65a1 1 0 00-.152-.933L4.22 12.9a1 1 0 010-1.35l1.052-1.403a1 1 0 00.152-.933l-.55-1.65a1 1 0 01.65-1.25l1.65-.55a1 1 0 00.933-.152l1.403-1.052z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span class="mr-1">Configurações</span>
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
+                                </svg>
+                            </button>
+                            <div id="settings-menu" class="hidden absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-20">
+                                <a href="/settings/containers" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                    Preservação de Containers
+                                </a>
+                                <a href="/settings/security" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                    Segurança MCP
+                                </a>
+                                <a href="/settings/llm" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                    Configurações LLM
+                                </a>
+                                <a href="/settings/api-keys" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                    API Tokens
+                                </a>
+                            </div>
+                        </div>
                         <a href="/auth/change-password" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
                             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 2c-2.673 0-8 1.337-8 4v1h16v-1c0-2.663-5.327-4-8-4z"></path>
@@ -99,18 +109,38 @@
                         Dashboard
                     </a>
                     {% if current_user is defined and current_user.is_authenticated %}
-                    <a href="/settings/api-keys" class="flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 6h14M5 18h14"></path>
+                    <button type="button" data-mobile-settings-toggle aria-expanded="false"
+                            class="w-full flex items-center justify-between text-gray-600 hover:text-gray-900 font-medium transition-colors">
+                        <span class="flex items-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M10.325 4.317a1 1 0 011.35 0l1.403 1.052a1 1 0 00.933.152l1.65-.55a1 1 0 011.25.65l.55 1.65a1 1 0 00.152.933l1.052 1.403a1 1 0 010 1.35l-1.052 1.403a1 1 0 00-.152.933l.55 1.65a1 1 0 01-.65 1.25l-1.65.55a1 1 0 00-.933.152l-1.403 1.052a1 1 0 01-1.35 0l-1.403-1.052a1 1 0 00-.933-.152l-1.65.55a1 1 0 01-1.25-.65l-.55-1.65a1 1 0 00-.152-.933L4.22 12.9a1 1 0 010-1.35l1.052-1.403a1 1 0 00.152-.933l-.55-1.65a1 1 0 01.65-1.25l1.65-.55a1 1 0 00.933-.152l1.403-1.052z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span class="ml-2">Configurações</span>
+                        </span>
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
                         </svg>
-                        API Tokens
-                    </a>
-                    <a href="/settings/security" class="flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 2c-2.673 0-8 1.337-8 4v1h16v-1c0-2.663-5.327-4-8-4z"></path>
-                        </svg>
-                        SeguranÃ§a MCP
-                    </a>
+                    </button>
+                    <div id="settings-mobile-menu" class="hidden pl-4 space-y-2">
+                        <a href="/settings/containers" class="flex items-center text-gray-600 hover:text-gray-900 text-sm transition-colors">
+                            <span class="mr-2 text-gray-400">-</span>
+                            Preservação de Containers
+                        </a>
+                        <a href="/settings/security" class="flex items-center text-gray-600 hover:text-gray-900 text-sm transition-colors">
+                            <span class="mr-2 text-gray-400">-</span>
+                            Segurança MCP
+                        </a>
+                        <a href="/settings/llm" class="flex items-center text-gray-600 hover:text-gray-900 text-sm transition-colors">
+                            <span class="mr-2 text-gray-400">-</span>
+                            Configurações LLM
+                        </a>
+                        <a href="/settings/api-keys" class="flex items-center text-gray-600 hover:text-gray-900 text-sm transition-colors">
+                            <span class="mr-2 text-gray-400">-</span>
+                            API Tokens
+                        </a>
+                    </div>
                     <a href="/auth/change-password" class="flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 2c-2.673 0-8 1.337-8 4v1h16v-1c0-2.663-5.327-4-8-4z"></path>
@@ -168,18 +198,48 @@
         
         function toggleMobileMenu() {
             const menu = document.getElementById('mobile-menu');
-            menu.classList.toggle('hidden');
+            if (menu) {
+                menu.classList.toggle('hidden');
+            }
         }
         
-        // Close mobile menu when clicking outside
+        const settingsToggle = document.querySelector('[data-settings-toggle]');
+        const settingsMenu = document.getElementById('settings-menu');
+        if (settingsToggle && settingsMenu) {
+            settingsToggle.addEventListener('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const isOpen = !settingsMenu.classList.contains('hidden');
+                settingsMenu.classList.toggle('hidden');
+                settingsToggle.setAttribute('aria-expanded', String(!isOpen));
+            });
+        }
+
+        const settingsMobileToggle = document.querySelector('[data-mobile-settings-toggle]');
+        const settingsMobileMenu = document.getElementById('settings-mobile-menu');
+        if (settingsMobileToggle && settingsMobileMenu) {
+            settingsMobileToggle.addEventListener('click', function(event) {
+                event.preventDefault();
+                const isOpen = !settingsMobileMenu.classList.contains('hidden');
+                settingsMobileMenu.classList.toggle('hidden');
+                settingsMobileToggle.setAttribute('aria-expanded', String(!isOpen));
+            });
+        }
+        
+        // Close menus when clicking outside
         document.addEventListener('click', function(event) {
             const menu = document.getElementById('mobile-menu');
             const menuToggle = document.querySelector('.mobile-menu-toggle');
-            
-            if (menu && !menu.contains(event.target) && !menuToggle.contains(event.target)) {
+            if (menu && menuToggle && !menu.contains(event.target) && !menuToggle.contains(event.target)) {
                 menu.classList.add('hidden');
+            }
+
+            if (settingsMenu && settingsToggle && !settingsMenu.contains(event.target) && !settingsToggle.contains(event.target)) {
+                settingsMenu.classList.add('hidden');
+                settingsToggle.setAttribute('aria-expanded', 'false');
             }
         });
     </script>
+
 </body>
 </html> 

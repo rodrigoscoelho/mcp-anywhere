@@ -327,6 +327,26 @@ class ContainerManager:
 
         return None
 
+    def set_preserve_preference(self, preserve: bool) -> None:
+        """Update container preservation preference in memory."""
+        self.preserve_containers = preserve
+        logger.debug(f"Container preservation preference set to {preserve}")
+
+    async def load_preserve_setting(self) -> bool:
+        """Refresh preservation preference from stored settings."""
+        try:
+            from mcp_anywhere.settings_store import get_effective_setting
+
+            value = await get_effective_setting("containers.preserve")
+            if value is None:
+                self.preserve_containers = Config.MCP_PRESERVE_CONTAINERS
+            else:
+                self.preserve_containers = value.lower() in ("true", "1", "yes")
+        except Exception as exc:
+            logger.debug(f"Failed to load container preservation preference: {exc}")
+            self.preserve_containers = Config.MCP_PRESERVE_CONTAINERS
+        return self.preserve_containers
+
     def _image_exists(self, image_name: str) -> bool:
         """Check if a Docker image exists locally."""
         try:
@@ -632,6 +652,8 @@ class ContainerManager:
         """Initialize MCP Anywhere resources: check Docker, ensure images, build servers."""
         logger.info("Initializing MCP Anywhere resources...")
 
+        await self.load_preserve_setting()
+
         # 1. Check if Docker is running
         if not self._check_docker_running():
             logger.error(
@@ -777,6 +799,7 @@ class ContainerManager:
 
     async def cleanup_all_containers(self) -> None:
         """Clean up all MCP server containers during shutdown."""
+        await self.load_preserve_setting()
         cleanup_required = not (self.preserve_containers and not os.environ.get("PYTEST_CURRENT_TEST"))
 
         try:

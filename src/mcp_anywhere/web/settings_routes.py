@@ -147,6 +147,72 @@ async def settings_llm_post(request: Request) -> Response:
     return RedirectResponse(url="/settings/llm?saved=1", status_code=302)
 
 
+
+async def settings_containers_get(request: Request) -> Response:
+    """Renderiza configuracao de preservacao de containers."""
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    preserve_value = await get_effective_setting("containers.preserve")
+    preserve_enabled = True
+    if preserve_value is not None:
+        preserve_enabled = preserve_value.lower() in ("true", "1", "yes")
+
+    saved = request.query_params.get("saved")
+    message = "Preferencia salva com sucesso." if saved else None
+
+    return templates.TemplateResponse(
+        "settings/containers.html",
+        {
+            "request": request,
+            "preserve_enabled": preserve_enabled,
+            "message": message,
+        },
+    )
+
+
+async def settings_containers_post(request: Request) -> Response:
+    """Processa atualizacao da preferencia de preservacao de containers."""
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    form = await request.form()
+    mode = _coerce_form_str(form.get("preserve_mode")).lower()
+    preserve_enabled = mode == "enable"
+
+    value = "true" if preserve_enabled else "false"
+    try:
+        await set_app_setting("containers.preserve", value)
+        # Atualiza variaveis em memoria para novos managers
+        import os
+
+        os.environ["MCP_PRESERVE_CONTAINERS"] = value
+
+        container_manager = getattr(request.app.state, "container_manager", None)
+        if container_manager:
+            if hasattr(container_manager, "set_preserve_preference"):
+                container_manager.set_preserve_preference(preserve_enabled)
+            else:
+                container_manager.preserve_containers = preserve_enabled
+            if hasattr(container_manager, "load_preserve_setting"):
+                await container_manager.load_preserve_setting()
+    except Exception as exc:
+        logger.exception("Erro salvando preservacao de containers")
+        return templates.TemplateResponse(
+            "settings/containers.html",
+            {
+                "request": request,
+                "message": f"Falha ao salvar: {exc}",
+                "preserve_enabled": preserve_enabled,
+            },
+            status_code=500,
+        )
+
+    return RedirectResponse(url="/settings/containers?saved=1", status_code=302)
+
+
 async def settings_security_get(request: Request) -> Response:
     """Renderiza a página de configurações de autenticação MCP."""
     if not await _require_authenticated(request):
@@ -220,6 +286,8 @@ async def settings_security_post(request: Request) -> Response:
 settings_routes = [
     Route("/settings/llm", endpoint=settings_llm_get, methods=["GET"]),
     Route("/settings/llm", endpoint=settings_llm_post, methods=["POST"]),
+    Route("/settings/containers", endpoint=settings_containers_get, methods=["GET"]),
+    Route("/settings/containers", endpoint=settings_containers_post, methods=["POST"]),
     Route("/settings/security", endpoint=settings_security_get, methods=["GET"]),
     Route("/settings/security", endpoint=settings_security_post, methods=["POST"]),
 ]
