@@ -58,30 +58,30 @@ async def api_tokens_post(request: Request) -> Response:
 
     form = await request.form()
 
-    def _as_str(value: object) -> str:
-        return value if isinstance(value, str) else ""
+    def _coerce_str(value: object) -> str:
+        return value.strip() if isinstance(value, str) else ""
 
-    action = _as_str(form.get("action")).strip()
+    action = _coerce_str(form.get("action"))
 
     if action == "create":
-        name = _as_str(form.get("name")).strip() or "API Token"
-        user_id = request.session.get("user_id")
-        if not isinstance(user_id, int):
+        name = _coerce_str(form.get("name")) or "API Token"
+        user_id_obj = request.session.get("user_id")
+        if not isinstance(user_id_obj, int):
             logger.warning("API token creation attempted without numeric user id")
             return RedirectResponse(
                 url="/settings/api-keys?message=invalid", status_code=302
             )
 
-        issued = await service.issue_token(name=name, created_by=user_id)
+        issued = await service.issue_token(name=name, created_by=user_id_obj)
         request.session["new_api_token"] = issued.token
         request.session["new_api_token_name"] = issued.metadata.name
         logger.info("API token issued: %s (id=%s)", issued.metadata.name, issued.metadata.id)
         return RedirectResponse(url="/settings/api-keys?message=created", status_code=302)
 
     if action == "revoke":
-        token_id_raw = form.get("token_id")
+        token_id_raw = _coerce_str(form.get("token_id"))
         try:
-            token_id = int(_as_str(token_id_raw))
+            token_id = int(token_id_raw)
         except (TypeError, ValueError):
             return RedirectResponse(
                 url="/settings/api-keys?message=invalid", status_code=302

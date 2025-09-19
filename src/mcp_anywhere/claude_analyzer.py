@@ -99,11 +99,22 @@ class AsyncClaudeAnalyzer:
         # Resolve LLM provider and model (DB > ENV). The factory may return None
         # as provider_instance to indicate the analyzer should keep the legacy
         # Anthropic path (preserves existing behavior and tests).
-        provider_instance, resolved_model = await get_provider_and_model()
-        logger.debug(
-            "Resolved LLM provider",
-            extra={"provider": getattr(provider_instance, "provider_name", None), "model": resolved_model},
-        )
+        try:
+            provider_instance, resolved_model = await get_provider_and_model()
+            logger.debug(
+                "Resolved LLM provider",
+                extra={
+                    "provider": getattr(provider_instance, "provider_name", None),
+                    "model": resolved_model,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback when optional deps missing
+            logger.warning(
+                "LLM provider resolution failed; falling back to legacy Anthropic client",
+                exc_info=exc,
+            )
+            provider_instance = None
+            resolved_model = None
 
         # If a provider instance was returned by the factory, use it for chat.
         if provider_instance:
@@ -123,7 +134,9 @@ class AsyncClaudeAnalyzer:
             raise ValueError("ANTHROPIC_API_KEY is required for legacy Anthropic analyzer path")
 
         try:
-            analysis_text = await self._call_claude_api(prompt, model_name=resolved_model)
+            analysis_text = await self._call_claude_api(
+                prompt, model_name=resolved_model or self.model_name
+            )
             return self._parse_claude_response(analysis_text)
         except AnthropicError as e:
             logger.exception(f"Claude API error: {e}")

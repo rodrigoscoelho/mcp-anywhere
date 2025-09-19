@@ -146,7 +146,22 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             else:
                 if api_token is not None:
                     logger.debug('Authenticated request via API token id=%s', api_token.id)
-                    return await call_next(request)
+                    try:
+                        return await call_next(request)
+                    except RuntimeError as exc:
+                        message = str(exc)
+                        if "StreamableHTTPSessionManager task group was not initialized" in message:
+                            logger.debug(
+                                "FastMCP lifespan not initialized; returning 503 response"
+                            )
+                            return JSONResponse(
+                                {
+                                    "error": "mcp_unavailable",
+                                    "error_description": "MCP router not ready",
+                                },
+                                status_code=503,
+                            )
+                        raise
 
         # Get OAuth provider from app state
         oauth_provider = getattr(request.app.state, "oauth_provider", None)
@@ -171,4 +186,19 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             )
 
         # Authentication successful, proceed with request
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except RuntimeError as exc:
+            message = str(exc)
+            if "StreamableHTTPSessionManager task group was not initialized" in message:
+                logger.debug(
+                    "FastMCP lifespan not initialized after OAuth pass-through; returning 503"
+                )
+                return JSONResponse(
+                    {
+                        "error": "mcp_unavailable",
+                        "error_description": "MCP router not ready",
+                    },
+                    status_code=503,
+                )
+            raise
