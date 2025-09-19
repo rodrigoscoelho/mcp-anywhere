@@ -19,6 +19,7 @@ from mcp_anywhere.core.mcp_manager import MCPManager
 from mcp_anywhere.core.middleware import ToolFilterMiddleware
 from mcp_anywhere.database import close_db, get_async_session, init_db
 from mcp_anywhere.logging_config import get_logger
+from mcp_anywhere.settings_store import get_effective_setting
 from mcp_anywhere.web import routes
 from mcp_anywhere.web.config_routes import config_routes
 from mcp_anywhere.web.api_token_routes import api_token_routes
@@ -94,6 +95,11 @@ You can use tools/list to see all available tools from all mounted servers.
     if api_token_service and os.environ.get("PYTEST_CURRENT_TEST"):
         await api_token_service.purge_all_tokens()
 
+    disable_auth_setting = await get_effective_setting("mcp.disable_auth")
+    mcp_auth_disabled = bool(
+        disable_auth_setting and disable_auth_setting.lower() in ("true", "1", "yes")
+    )
+
     # Configure middleware - Using SameSite cookies for CSRF protection (modern approach)
     middleware = [
         Middleware(
@@ -164,6 +170,7 @@ You can use tools/list to see all available tools from all mounted servers.
     app.state.get_async_session = get_async_session
     app.state.transport_mode = transport_mode
     app.state.api_token_service = api_token_service
+    app.state.mcp_auth_disabled = mcp_auth_disabled
 
     if oauth_provider:
         app.state.oauth_provider = oauth_provider

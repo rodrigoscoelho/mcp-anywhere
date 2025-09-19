@@ -107,3 +107,10 @@ class Config:
     DEFAULT_SERVERS_FILE = os.environ.get(
         "DEFAULT_SERVERS_FILE", "default_servers.json"
     )
+
+    # MCP auth toggle (allows disabling Bearer requirement for MCP endpoints)
+    MCP_DISABLE_AUTH = os.environ.get("MCP_DISABLE_AUTH", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )

@@ -138,5 +138,9 @@ async def get_effective_setting(key: str) -> Optional[str]:
     if key == "llm.anthropic_api_key":
         return Config.ANTHROPIC_API_KEY
 
+    if key == "mcp.disable_auth":
+        env_value = "true" if Config.MCP_DISABLE_AUTH else "false"
+        return env_value
+
     # Unknown key - no fallback
     return None

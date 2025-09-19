@@ -125,6 +125,12 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith(mcp_path) or ".well-known" in path:
             return await call_next(request)
 
+        # Optional bypass: allow anonymous MCP access when auth is disabled via configuration/state
+        if getattr(
+            request.app.state, "mcp_auth_disabled", Config.MCP_DISABLE_AUTH
+        ):
+            return await call_next(request)
+
         # Get authorization header
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):

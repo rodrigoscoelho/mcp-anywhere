@@ -143,8 +143,79 @@ async def settings_llm_post(request: Request) -> HTMLResponse:
     return RedirectResponse(url="/settings/llm?saved=1", status_code=302)
 
 
+async def settings_security_get(request: Request) -> HTMLResponse:
+    """Renderiza a página de configurações de autenticação MCP."""
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    disable_value = await get_effective_setting("mcp.disable_auth")
+    auth_disabled = bool(
+        disable_value and disable_value.lower() in ("true", "1", "yes")
+    )
+
+    saved = request.query_params.get("saved")
+    message = "Configurações salvas com sucesso." if saved else None
+
+    return templates.TemplateResponse(  # type: ignore[return-value]
+        "settings/security.html",
+        {
+            "request": request,
+            "auth_disabled": auth_disabled,
+            "message": message,
+        },
+    )
+
+
+async def settings_security_post(request: Request) -> HTMLResponse:
+    """Processa submissão da configuração de autenticação MCP."""
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    form = await request.form()
+    mode = (form.get("mode") or "").strip()
+
+    if mode not in {"require", "disable"}:
+        return templates.TemplateResponse(
+            "settings/security.html",
+            {
+                "request": request,
+                "auth_disabled": getattr(
+                    request.app.state, "mcp_auth_disabled", False
+                ),
+                "message": "Valor inválido para modo de autenticação.",
+            },
+            status_code=400,
+        )
+
+    disable = mode == "disable"
+
+    try:
+        await set_app_setting("mcp.disable_auth", "true" if disable else "false")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Erro salvando configuração de autenticação", exc_info=exc)
+        return templates.TemplateResponse(
+            "settings/security.html",
+            {
+                "request": request,
+                "auth_disabled": getattr(
+                    request.app.state, "mcp_auth_disabled", False
+                ),
+                "message": f"Falha ao salvar: {exc}",
+            },
+            status_code=500,
+        )
+
+    request.app.state.mcp_auth_disabled = disable
+
+    return RedirectResponse(url="/settings/security?saved=1", status_code=302)
+
+
 # Rotas exportadas para serem agregadas em app.py (mesmo padrão usado por config_routes/secret_routes)
 settings_routes = [
     Route("/settings/llm", endpoint=settings_llm_get, methods=["GET"]),
     Route("/settings/llm", endpoint=settings_llm_post, methods=["POST"]),
+    Route("/settings/security", endpoint=settings_security_get, methods=["GET"]),
+    Route("/settings/security", endpoint=settings_security_post, methods=["POST"]),
 ]
