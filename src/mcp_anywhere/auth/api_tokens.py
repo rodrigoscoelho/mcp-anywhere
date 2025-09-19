@@ -7,7 +7,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mcp_anywhere.auth.models import APIToken
@@ -66,6 +66,12 @@ class APITokenService:
             await session.refresh(token)
 
         return IssuedToken(token=raw_token, metadata=token)
+
+    async def purge_all_tokens(self) -> None:
+        """Remove every API token entry (used mainly in test environments)."""
+        async with self._get_session_factory() as session:
+            await session.execute(delete(APIToken))
+            await session.commit()
 
     async def list_tokens(self) -> list[APIToken]:
         """Return non-revoked tokens ordered by creation date (desc)."""

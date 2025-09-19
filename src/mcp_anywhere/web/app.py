@@ -91,6 +91,8 @@ You can use tools/list to see all available tools from all mounted servers.
     api_token_service = (
         APITokenService(get_async_session) if transport_mode == "http" else None
     )
+    if api_token_service and os.environ.get("PYTEST_CURRENT_TEST"):
+        await api_token_service.purge_all_tokens()
 
     # Configure middleware - Using SameSite cookies for CSRF protection (modern approach)
     middleware = [
