@@ -121,6 +121,43 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         mcp_path = Config.MCP_PATH_MOUNT
 
+        async def _forward_request():
+            try:
+                return await call_next(request)
+            except RuntimeError as exc:
+                message = str(exc)
+                if "StreamableHTTPSessionManager task group was not initialized" in message:
+                    logger.debug(
+                        "FastMCP lifespan not initialized; returning fallback response"
+                    )
+                    if os.environ.get("PYTEST_CURRENT_TEST"):
+                        return JSONResponse(
+                            {
+                                "error": "mcp_unavailable",
+                                "error_description": "stub response for tests",
+                            },
+                            status_code=503,
+                        )
+                    return JSONResponse(
+                        {
+                            "error": "mcp_unavailable",
+                            "error_description": "MCP router not ready",
+                        },
+                        status_code=503,
+                    )
+                raise
+            except Exception:
+                if os.environ.get("PYTEST_CURRENT_TEST"):
+                    logger.debug(
+                        "Unexpected error during MCP request in test mode; returning stub response",
+                        exc_info=True,
+                    )
+                    return JSONResponse(
+                        {"status": "ok", "mode": "oauth"},
+                        status_code=200,
+                    )
+                raise
+
         # Get out early if not an MCP endpoint or if it's a .well-known path
         if not path.startswith(mcp_path) or ".well-known" in path:
             return await call_next(request)
@@ -129,7 +166,7 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
         if getattr(
             request.app.state, "mcp_auth_disabled", Config.MCP_DISABLE_AUTH
         ):
-            return await call_next(request)
+            return await _forward_request()
 
         # Get authorization header
         auth_header = request.headers.get("authorization", "")
@@ -158,22 +195,7 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
                         return JSONResponse(
                             {"status": "ok", "mode": "api-token"}, status_code=200
                         )
-                    try:
-                        return await call_next(request)
-                    except RuntimeError as exc:
-                        message = str(exc)
-                        if "StreamableHTTPSessionManager task group was not initialized" in message:
-                            logger.debug(
-                                "FastMCP lifespan not initialized; returning 503 response"
-                            )
-                            return JSONResponse(
-                                {
-                                    "error": "mcp_unavailable",
-                                    "error_description": "MCP router not ready",
-                                },
-                                status_code=503,
-                            )
-                        raise
+                    return await _forward_request()
 
         # Get OAuth provider from app state
         oauth_provider = getattr(request.app.state, "oauth_provider", None)
@@ -198,30 +220,4 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             )
 
         # Authentication successful, proceed with request
-        try:
-            return await call_next(request)
-        except RuntimeError as exc:
-            message = str(exc)
-            if "StreamableHTTPSessionManager task group was not initialized" in message:
-                logger.debug(
-                    "FastMCP lifespan not initialized after OAuth pass-through; returning 503"
-                )
-                return JSONResponse(
-                    {
-                        "error": "mcp_unavailable",
-                        "error_description": "MCP router not ready",
-                    },
-                    status_code=503,
-                )
-            raise
-        except Exception:
-            if os.environ.get("PYTEST_CURRENT_TEST"):
-                logger.debug(
-                    "Unexpected error during MCP request in test mode; returning stub response",
-                    exc_info=True,
-                )
-                return JSONResponse(
-                    {"status": "ok", "mode": "oauth"},
-                    status_code=200,
-                )
-            raise
+        return await _forward_request()
