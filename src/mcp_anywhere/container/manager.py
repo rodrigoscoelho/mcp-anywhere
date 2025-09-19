@@ -168,12 +168,21 @@ class ContainerManager:
         try:
             container = self.docker_client.containers.get(container_name)
 
-            # Check if container is running
-            if container.status != "running":
-                logger.debug(
-                    f"Container {container_name} is not running (status: {container.status})"
-                )
-                return False
+            status = getattr(container, "status", "")
+            if status != "running":
+                if self.preserve_containers and status in {"created", "exited", "paused"}:
+                    try:
+                        logger.info(f"Restarting preserved container {container_name} (status: {status})")
+                        container.start()
+                        container.reload()
+                        status = getattr(container, "status", "")
+                    except APIError as exc:
+                        logger.warning(f"Failed to restart preserved container {container_name}: {exc}")
+                if status != "running":
+                    logger.debug(
+                        f"Container {container_name} is not running (status: {status})"
+                    )
+                    return False
 
             # Check if container uses the expected image
             container_image = (
