@@ -416,13 +416,23 @@ class ContainerManager:
             parts = shlex.split(cmd)
 
             if server.runtime_type in ["npx", "uvx"]:
-                # For stdio-based servers, ensure stdio transport is specified
-                if "stdio" not in parts:
+                has_stdio_token = any("stdio" in part for part in parts)
+                has_http_token = any("http" in part for part in parts)
+                references_builtin_cli = any(
+                    keyword in part
+                    for part in parts
+                    for keyword in ("mcp-anywhere", "mcp_anywhere", "fastmcp")
+                )
+
+                if (
+                    not has_stdio_token
+                    and not has_http_token
+                    and references_builtin_cli
+                    and "serve" in parts
+                ):
                     parts.append("stdio")
-                return parts
-            else:
-                # For other types, return parsed command as-is
-                return parts
+
+            return parts
 
         except ValueError as e:
             # shlex parsing failed (e.g., unmatched quotes)

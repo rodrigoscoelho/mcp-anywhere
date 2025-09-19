@@ -49,6 +49,8 @@ def create_mcp_config(server: "MCPServer") -> dict[str, dict[str, Any]]:
 
     # Extract environment variables (both regular and secret file paths)
     env_vars = container_manager._get_env_vars(server)
+    if "MCP_TRANSPORT" not in env_vars:
+        env_vars["MCP_TRANSPORT"] = "stdio"
     env_args = []
     for key, value in env_vars.items():
         env_args.extend(["-e", f"{key}={value}"])
