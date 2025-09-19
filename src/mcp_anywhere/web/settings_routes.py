@@ -1,10 +1,10 @@
-"""Rotas para configuração LLM (provider/model e OpenRouter API key).
+"""Rotas para configuraAAo LLM (provider/model e OpenRouter API key).
 
 Responsabilidades:
-- GET /settings/llm: exibe valores efetivos (DB > ENV) e formulário para alterar provider/model e
+- GET /settings/llm: exibe valores efetivos (DB > ENV) e formulArio para alterar provider/model e
   opcionalmente salvar a OpenRouter API key (criptografada).
-- POST /settings/llm: valida e persiste configurações em DB via settings_store.
-- Proteção: redireciona para /auth/login se usuário não autenticado (mesma abordagem usada em outras rotas).
+- POST /settings/llm: valida e persiste configuraAAes em DB via settings_store.
+- ProteAAo: redireciona para /auth/login se usuArio nAo autenticado (mesma abordagem usada em outras rotas).
 """
 
 from starlette.requests import Request
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 
 async def _require_authenticated(request: Request):
-    """Retorna True se usuário autenticado, False caso contrário."""
+    """Retorna True se usuArio autenticado, False caso contrArio."""
     user_id = request.session.get("user_id")
     return bool(user_id)
 
@@ -34,15 +34,15 @@ def _coerce_form_str(value: object) -> str:
 
 
 async def settings_llm_get(request: Request) -> Response:
-    """Renderiza a página de configurações LLM.
+    """Renderiza a pAgina de configuraAAes LLM.
 
     Contextos passados para o template:
     - provider_atual, model_atual : valores efetivos (get_effective_setting)
     - provider_persistido, model_persistido: valores salvos no DB (get_app_setting) para preencher form
-    - has_openrouter_key_persisted: booleano se existe chave salva no DB (não exibir o valor)
+    - has_openrouter_key_persisted: booleano se existe chave salva no DB (nAo exibir o valor)
     - message: opcional (ex.: ?saved=1)
     """
-    # Autenticação: mesma estratégia usada em change_password e outras rotas protegidas
+    # AutenticaAAo: mesma estratAgia usada em change_password e outras rotas protegidas
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         logger.info(f"User not authenticated, redirecting to login: {login_url}")
@@ -52,20 +52,20 @@ async def settings_llm_get(request: Request) -> Response:
     provider_atual = await get_effective_setting("llm.provider")
     model_atual = await get_effective_setting("llm.model")
 
-    # Valores persistidos (raw) para preencher o formulário se existirem
+    # Valores persistidos (raw) para preencher o formulArio se existirem
     provider_row = await get_app_setting("llm.provider")
     model_row = await get_app_setting("llm.model")
 
     provider_persistido = provider_row[0] if provider_row else None
     model_persistido = model_row[0] if model_row else None
 
-    # Indica se há chave OpenRouter salva (não exibimos o conteúdo)
+    # Indica se hA chave OpenRouter salva (nAo exibimos o conteAodo)
     key_row = await get_app_setting("llm.openrouter_api_key")
     has_openrouter_key_persisted = bool(key_row and key_row[0])
 
-    # Mensagem simples via query param (padrão existente no projeto)
+    # Mensagem simples via query param (padrAo existente no projeto)
     saved = request.query_params.get("saved")
-    message = "Configurações salvas com sucesso." if saved else None
+    message = "ConfiguraAAes salvas com sucesso." if saved else None
 
     return templates.TemplateResponse(
         "settings/llm.html",
@@ -82,16 +82,16 @@ async def settings_llm_get(request: Request) -> Response:
 
 
 async def settings_llm_post(request: Request) -> Response:
-    """Processa submissão do formulário e persiste configurações no DB.
+    """Processa submissAo do formulArio e persiste configuraAAes no DB.
 
     Regras:
-    - provider obrigatório: "anthropic" ou "openrouter"
-    - model obrigatório e deve corresponder ao provider:
+    - provider obrigatA3rio: "anthropic" ou "openrouter"
+    - model obrigatA3rio e deve corresponder ao provider:
         - anthropic => "claude-sonnet-4-20250514"
         - openrouter => "openai/gpt-5"
-    - openrouter_api_key opcional: se fornecida (não vazia) -> salvar com encrypt=True
-      se vazia -> NÃO sobrepor o valor existente (não chamar set_app_setting para a chave)
-    - Após salvar: redirecionar para GET /settings/llm?saved=1
+    - openrouter_api_key opcional: se fornecida (nAo vazia) -> salvar com encrypt=True
+      se vazia -> NAO sobrepor o valor existente (nAo chamar set_app_setting para a chave)
+    - ApA3s salvar: redirecionar para GET /settings/llm?saved=1
     """
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
@@ -102,13 +102,13 @@ async def settings_llm_post(request: Request) -> Response:
     model = _coerce_form_str(form.get("model"))
     openrouter_api_key = _coerce_form_str(form.get("openrouter_api_key"))
 
-    # Validações
+    # ValidaAAes
     if provider not in {"anthropic", "openrouter"}:
         return templates.TemplateResponse(
             "settings/llm.html",
             {
                 "request": request,
-                "message": "Provider inválido. Valor permitido: 'anthropic' ou 'openrouter'.",
+                "message": "Provider invAlido. Valor permitido: 'anthropic' ou 'openrouter'.",
             },
             status_code=400,
         )
@@ -123,12 +123,12 @@ async def settings_llm_post(request: Request) -> Response:
             "settings/llm.html",
             {
                 "request": request,
-                "message": "Model inválido para o provider selecionado.",
+                "message": "Model invAlido para o provider selecionado.",
             },
             status_code=400,
         )
 
-    # Persistência (DB)
+    # PersistAancia (DB)
     try:
         await set_app_setting("llm.provider", provider)
         await set_app_setting("llm.model", model)
@@ -136,14 +136,14 @@ async def settings_llm_post(request: Request) -> Response:
             # Persistir criptografado
             await set_app_setting("llm.openrouter_api_key", openrouter_api_key, encrypt=True)
     except Exception as exc:
-        logger.exception("Erro salvando configurações LLM")
+        logger.exception("Erro salvando configuraAAes LLM")
         return templates.TemplateResponse(
             "settings/llm.html",
             {"request": request, "message": f"Falha ao salvar: {str(exc)}"},
             status_code=500,
         )
 
-    # Usamos redirect com query param para exibir mensagem após GET
+    # Usamos redirect com query param para exibir mensagem apA3s GET
     return RedirectResponse(url="/settings/llm?saved=1", status_code=302)
 
 
@@ -214,7 +214,7 @@ async def settings_containers_post(request: Request) -> Response:
 
 
 async def settings_security_get(request: Request) -> Response:
-    """Renderiza a página de configurações de autenticação MCP."""
+    """Renderiza a pAgina de configuraAAes de autenticaAAo MCP."""
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
@@ -225,7 +225,7 @@ async def settings_security_get(request: Request) -> Response:
     )
 
     saved = request.query_params.get("saved")
-    message = "Configurações salvas com sucesso." if saved else None
+    message = "ConfiguraAAes salvas com sucesso." if saved else None
 
     return templates.TemplateResponse(
         "settings/security.html",
@@ -238,7 +238,7 @@ async def settings_security_get(request: Request) -> Response:
 
 
 async def settings_security_post(request: Request) -> Response:
-    """Processa submissão da configuração de autenticação MCP."""
+    """Processa submissAo da configuraAAo de autenticaAAo MCP."""
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
@@ -254,7 +254,7 @@ async def settings_security_post(request: Request) -> Response:
                 "auth_disabled": getattr(
                     request.app.state, "mcp_auth_disabled", False
                 ),
-                "message": "Valor inválido para modo de autenticação.",
+                "message": "Valor invAlido para modo de autenticaAAo.",
             },
             status_code=400,
         )
@@ -264,7 +264,7 @@ async def settings_security_post(request: Request) -> Response:
     try:
         await set_app_setting("mcp.disable_auth", "true" if disable else "false")
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Erro salvando configuração de autenticação", exc_info=exc)
+        logger.exception("Erro salvando configuraAAo de autenticaAAo", exc_info=exc)
         return templates.TemplateResponse(
             "settings/security.html",
             {
@@ -282,7 +282,7 @@ async def settings_security_post(request: Request) -> Response:
     return RedirectResponse(url="/settings/security?saved=1", status_code=302)
 
 
-# Rotas exportadas para serem agregadas em app.py (mesmo padrão usado por config_routes/secret_routes)
+# Rotas exportadas para serem agregadas em app.py (mesmo padrAo usado por config_routes/secret_routes)
 settings_routes = [
     Route("/settings/llm", endpoint=settings_llm_get, methods=["GET"]),
     Route("/settings/llm", endpoint=settings_llm_post, methods=["POST"]),
