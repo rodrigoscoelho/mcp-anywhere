@@ -1,17 +1,11 @@
 """Authentication and authorization models for OAuth 2.0 implementation."""
 
+from __future__ import annotations
+
 from datetime import datetime
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-)
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from mcp_anywhere.base import Base
@@ -22,10 +16,12 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True)
-    username = Column(String(80), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
 
     def set_password(self, password: str) -> None:
         """Set password with proper hashing."""
@@ -49,21 +45,33 @@ class OAuth2Client(Base):
 
     __tablename__ = "oauth2_clients"
 
-    id = Column(Integer, primary_key=True)
-    client_id = Column(String(48), unique=True, nullable=False, index=True)
-    client_secret = Column(String(120), nullable=True)  # Can be null for public clients
-    client_name = Column(String(255), nullable=True)
-    redirect_uri = Column(Text, nullable=False)  # Can store multiple URIs as JSON
-    scope = Column(String(255), nullable=False, default="read")
-    grant_types = Column(String(255), nullable=False, default="authorization_code")
-    response_types = Column(String(255), nullable=False, default="code")
-    token_endpoint_auth_method = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[str] = mapped_column(
+        String(48), unique=True, nullable=False, index=True
+    )
+    client_secret: Mapped[str | None] = mapped_column(  # Can be null for public clients
+        String(120), nullable=True
+    )
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    redirect_uri: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # Can store multiple URIs as JSON
+    scope: Mapped[str] = mapped_column(String(255), nullable=False, default="read")
+    grant_types: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="authorization_code"
+    )
+    response_types: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="code"
+    )
+    token_endpoint_auth_method: Mapped[str] = mapped_column(
         String(50), nullable=False, default="client_secret_basic"
     )
-    is_confidential = Column(Boolean, nullable=False, default=True)
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    is_confidential: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
@@ -90,19 +98,23 @@ class AuthorizationCode(Base):
 
     __tablename__ = "authorization_codes"
 
-    id = Column(Integer, primary_key=True)
-    code = Column(String(128), unique=True, nullable=False, index=True)
-    client_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(
         String(48), ForeignKey("oauth2_clients.client_id"), nullable=False, index=True
     )
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    redirect_uri = Column(String(500), nullable=False)
-    scope = Column(String(255), nullable=False)
-    code_challenge = Column(String(128), nullable=True)  # PKCE support
-    code_challenge_method = Column(String(10), nullable=True)  # S256 or plain
-    expires_at = Column(DateTime, nullable=False)
-    is_used = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    redirect_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    code_challenge: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    code_challenge_method: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
 
     def is_expired(self) -> bool:
         """Check if the authorization code has expired."""
@@ -130,19 +142,21 @@ class OAuth2Token(Base):
 
     __tablename__ = "oauth2_tokens"
 
-    id = Column(Integer, primary_key=True)
-    token = Column(String(255), unique=True, nullable=False, index=True)
-    token_type = Column(String(20), nullable=False, default="Bearer")
-    client_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    token_type: Mapped[str] = mapped_column(String(20), nullable=False, default="Bearer")
+    client_id: Mapped[str] = mapped_column(
         String(48), ForeignKey("oauth2_clients.client_id"), nullable=False, index=True
     )
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    scope = Column(String(255), nullable=False)
-    resource = Column(String(500), nullable=True)  # Resource server URL
-    expires_at = Column(DateTime, nullable=False, index=True)
-    is_revoked = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_used_at = Column(DateTime, nullable=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def is_expired(self) -> bool:
         """Check if the access token has expired."""
@@ -176,15 +190,19 @@ class APIToken(Base):
 
     __tablename__ = "api_tokens"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String(120), nullable=False)
-    token_hash = Column(String(64), unique=True, nullable=False, index=True)
-    token_prefix = Column(String(16), nullable=False, index=True)
-    token_hint = Column(String(12), nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_used_at = Column(DateTime, nullable=True)
-    revoked = Column(Boolean, nullable=False, default=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    token_prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    token_hint: Mapped[str] = mapped_column(String(12), nullable=False)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     def to_dict(self) -> dict:
         """Convert token metadata to dictionary (never returns the raw token)."""
@@ -205,22 +223,22 @@ class OAuth2RefreshToken(Base):
 
     __tablename__ = "oauth2_refresh_tokens"
 
-    id = Column(Integer, primary_key=True)
-    token = Column(String(255), unique=True, nullable=False, index=True)
-    access_token_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    access_token_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("oauth2_tokens.id"), nullable=False, index=True
     )
-    client_id = Column(
+    client_id: Mapped[str] = mapped_column(
         String(48), ForeignKey("oauth2_clients.client_id"), nullable=False, index=True
     )
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    scope = Column(String(255), nullable=False)
-    expires_at = Column(
-        DateTime, nullable=True
-    )  # Refresh tokens can be long-lived or never expire
-    is_revoked = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_used_at = Column(DateTime, nullable=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def is_expired(self) -> bool:
         """Check if the refresh token has expired."""

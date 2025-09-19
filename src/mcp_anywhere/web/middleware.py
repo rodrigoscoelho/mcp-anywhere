@@ -19,8 +19,8 @@ class SessionAuthMiddleware(BasePathProtectionMiddleware):
     def __init__(
         self,
         app: ASGIApp,
-        protected_paths: list[str] = None,
-        skip_paths: list[str] = None,
+        protected_paths: list[str] | None = None,
+        skip_paths: list[str] | None = None,
         login_url: str = "/auth/login",
     ) -> None:
         """Initialize session authentication middleware.

@@ -20,8 +20,8 @@ class BasePathProtectionMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app: ASGIApp,
-        protected_paths: list[str] = None,
-        skip_paths: list[str] = None,
+        protected_paths: list[str] | None = None,
+        skip_paths: list[str] | None = None,
     ) -> None:
         """Initialize base path protection middleware.
 

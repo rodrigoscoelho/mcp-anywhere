@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
@@ -18,7 +18,7 @@ async def _require_authenticated(request: Request) -> bool:
     return bool(request.session.get("user_id"))
 
 
-async def api_tokens_get(request: Request) -> HTMLResponse:
+async def api_tokens_get(request: Request) -> Response:
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
@@ -46,7 +46,7 @@ async def api_tokens_get(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("settings/api_tokens.html", context)
 
 
-async def api_tokens_post(request: Request) -> HTMLResponse:
+async def api_tokens_post(request: Request) -> Response:
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
@@ -57,11 +57,21 @@ async def api_tokens_post(request: Request) -> HTMLResponse:
         return HTMLResponse("API token service unavailable", status_code=500)
 
     form = await request.form()
-    action = (form.get("action") or "").strip()
+
+    def _as_str(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
+    action = _as_str(form.get("action")).strip()
 
     if action == "create":
-        name = (form.get("name") or "").strip() or "API Token"
+        name = _as_str(form.get("name")).strip() or "API Token"
         user_id = request.session.get("user_id")
+        if not isinstance(user_id, int):
+            logger.warning("API token creation attempted without numeric user id")
+            return RedirectResponse(
+                url="/settings/api-keys?message=invalid", status_code=302
+            )
+
         issued = await service.issue_token(name=name, created_by=user_id)
         request.session["new_api_token"] = issued.token
         request.session["new_api_token_name"] = issued.metadata.name
@@ -71,7 +81,7 @@ async def api_tokens_post(request: Request) -> HTMLResponse:
     if action == "revoke":
         token_id_raw = form.get("token_id")
         try:
-            token_id = int(token_id_raw)
+            token_id = int(_as_str(token_id_raw))
         except (TypeError, ValueError):
             return RedirectResponse(
                 url="/settings/api-keys?message=invalid", status_code=302
