@@ -191,9 +191,7 @@ class AsyncClaudeAnalyzer:
     def _build_prompt(self, url: str, readme: str | None, pkg_json: str | None, pyproject: str | None) -> str:
         """Constructs the prompt for the Claude API call."""
         def _indent_followup(text: str) -> str:
-            return text.replace("
-", "
-   ")
+            return text.replace("\n", "\n   ")
 
         runtime_guidance = _indent_followup(RUNTIME_GUIDANCE)
         install_guidance = _indent_followup(INSTALL_GUIDANCE)
