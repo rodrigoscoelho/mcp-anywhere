@@ -8,7 +8,7 @@ Responsabilidades:
 """
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
@@ -29,7 +29,11 @@ async def _require_authenticated(request: Request):
     return bool(user_id)
 
 
-async def settings_llm_get(request: Request) -> HTMLResponse:
+def _coerce_form_str(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+async def settings_llm_get(request: Request) -> Response:
     """Renderiza a página de configurações LLM.
 
     Contextos passados para o template:
@@ -77,7 +81,7 @@ async def settings_llm_get(request: Request) -> HTMLResponse:
     )
 
 
-async def settings_llm_post(request: Request) -> HTMLResponse:
+async def settings_llm_post(request: Request) -> Response:
     """Processa submissão do formulário e persiste configurações no DB.
 
     Regras:
@@ -94,9 +98,9 @@ async def settings_llm_post(request: Request) -> HTMLResponse:
         return RedirectResponse(url=login_url, status_code=302)
 
     form = await request.form()
-    provider = (form.get("provider") or "").strip()
-    model = (form.get("model") or "").strip()
-    openrouter_api_key = (form.get("openrouter_api_key") or "").strip()
+    provider = _coerce_form_str(form.get("provider"))
+    model = _coerce_form_str(form.get("model"))
+    openrouter_api_key = _coerce_form_str(form.get("openrouter_api_key"))
 
     # Validações
     if provider not in {"anthropic", "openrouter"}:
@@ -143,7 +147,7 @@ async def settings_llm_post(request: Request) -> HTMLResponse:
     return RedirectResponse(url="/settings/llm?saved=1", status_code=302)
 
 
-async def settings_security_get(request: Request) -> HTMLResponse:
+async def settings_security_get(request: Request) -> Response:
     """Renderiza a página de configurações de autenticação MCP."""
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
@@ -157,7 +161,7 @@ async def settings_security_get(request: Request) -> HTMLResponse:
     saved = request.query_params.get("saved")
     message = "Configurações salvas com sucesso." if saved else None
 
-    return templates.TemplateResponse(  # type: ignore[return-value]
+    return templates.TemplateResponse(
         "settings/security.html",
         {
             "request": request,
@@ -167,14 +171,14 @@ async def settings_security_get(request: Request) -> HTMLResponse:
     )
 
 
-async def settings_security_post(request: Request) -> HTMLResponse:
+async def settings_security_post(request: Request) -> Response:
     """Processa submissão da configuração de autenticação MCP."""
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
 
     form = await request.form()
-    mode = (form.get("mode") or "").strip()
+    mode = _coerce_form_str(form.get("mode"))
 
     if mode not in {"require", "disable"}:
         return templates.TemplateResponse(

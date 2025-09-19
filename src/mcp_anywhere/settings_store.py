@@ -24,7 +24,7 @@ async def set_app_setting(key: str, value: Optional[str], *, encrypt: bool = Fal
     - Se encrypt=True, o valor será criptografado antes de salvar (e `encrypted` marcado True).
     - Se value is None, a chave será removida do DB (se existir).
     """
-    async with get_async_session() as session:  # type: AsyncSession
+    async with get_async_session() as session:
         async with session.begin():
             stmt = select(AppSetting).where(AppSetting.key == key)
             result = await session.execute(stmt)
@@ -59,7 +59,7 @@ async def get_app_setting(key: str) -> Optional[Tuple[Optional[str], bool]]:
 
     OBS: Se encrypted==True o `value` retornado será o ciphertext tal como armazenado.
     """
-    async with get_async_session() as session:  # type: AsyncSession
+    async with get_async_session() as session:
         stmt = select(AppSetting).where(AppSetting.key == key)
         result = await session.execute(stmt)
         row = result.scalar_one_or_none()
