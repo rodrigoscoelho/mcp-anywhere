@@ -142,6 +142,12 @@
                    class="btn-info flex-1 text-sm font-medium py-2 px-3 rounded text-center">
                     View Details
                 </a>
+                <form method="POST" action="/servers/{{ server.id }}/rebuild">
+                    <button type="submit"
+                            class="bg-indigo-500 text-white text-sm font-medium py-2 px-3 rounded hover:bg-indigo-600">
+                        Rebuild
+                    </button>
+                </form>
                 <form method="POST" action="/servers/{{ server.id }}/delete" 
                       onsubmit="return confirm('Are you sure you want to delete {{ server.name }}?')">
                     <button type="submit" 

@@ -901,6 +901,80 @@ async def edit_server(request: Request):
         return await edit_server_post(request)
 
 
+async def rebuild_server(request: Request) -> Response:
+    """Trigger a full rebuild of the MCP server container/image."""
+    if request.method != "POST":
+        return RedirectResponse(url="/", status_code=302)
+
+    server_id = request.path_params.get("server_id")
+    if not server_id:
+        return RedirectResponse(url="/", status_code=302)
+
+    async with get_async_session() as db_session:
+        stmt = (
+            select(MCPServer)
+            .options(selectinload(MCPServer.secret_files), selectinload(MCPServer.tools))
+            .where(MCPServer.id == server_id)
+        )
+        result = await db_session.execute(stmt)
+        server = result.scalar_one_or_none()
+
+        if not server:
+            logger.warning(f"Rebuild requested for unknown server id={server_id}")
+            return RedirectResponse(url="/", status_code=302)
+
+        container_manager = ContainerManager()
+        mcp_manager = get_mcp_manager(request)
+
+        try:
+            server.build_status = "building"
+            server.build_logs = "Rebuilding..."
+            server.build_error = None
+            await db_session.commit()
+
+            # Build fresh image (reinstalls dependencies)
+            image_tag = container_manager.build_server_image(server)
+            server.image_tag = image_tag
+            server.build_status = "built"
+            server.build_logs = f"Rebuilt image {image_tag}"
+            await db_session.commit()
+
+            if mcp_manager:
+                # Ensure latest relationships for mount
+                await db_session.refresh(server, ["secret_files"])
+
+                try:
+                    mcp_manager.remove_server(server.id)
+                except Exception as exc:
+                    logger.debug(
+                        f"No existing mount to remove for server {server.id}: {exc}"
+                    )
+
+                container_name = container_manager._get_container_name(server.id)
+                container_manager._cleanup_existing_container(container_name)
+
+                discovered_tools = await mcp_manager.add_server(server)
+                await store_server_tools(db_session, server, discovered_tools)
+                await db_session.commit()
+
+            logger.info(f"Server '{server.name}' rebuilt successfully by request")
+
+        except (RuntimeError, ValueError, ConnectionError, OSError) as exc:
+            error_message = str(exc)
+            server.build_status = "failed"
+            server.build_error = error_message
+            server.build_logs = error_message
+            await db_session.commit()
+            logger.error(f"Failed to rebuild server '{server.name}': {error_message}")
+
+    if request.headers.get("HX-Request"):
+        response = HTMLResponse("", status_code=200)
+        response.headers["HX-Redirect"] = f"/servers/{server_id}"
+        return response
+
+    return RedirectResponse(url=f"/servers/{server_id}", status_code=302)
+
+
 async def favicon(_request: Request):
     """Handle favicon.ico requests with a 204 No Content response to silence 404s."""
     return Response(status_code=204)
@@ -922,6 +996,7 @@ routes = [
     Route("/servers/add", endpoint=add_server, methods=["GET", "POST"]),
     Route("/servers/{server_id}", endpoint=server_detail, methods=["GET"]),
     Route("/servers/{server_id}/edit", endpoint=edit_server, methods=["GET", "POST"]),
+    Route("/servers/{server_id}/rebuild", endpoint=rebuild_server, methods=["POST"]),
     Route(
         "/servers/{server_id}/tools/{tool_id}/toggle",
         endpoint=toggle_tool,
@@ -929,3 +1004,4 @@ routes = [
     ),
     Route("/servers/{server_id}/delete", endpoint=delete_server, methods=["POST"]),
 ]
+

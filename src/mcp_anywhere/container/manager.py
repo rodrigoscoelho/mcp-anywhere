@@ -96,6 +96,9 @@ class ContainerManager:
 
         self.docker_client: DockerClientProtocol = self._create_docker_client()
 
+        # Respect configuration flag to keep containers between runs
+        self.preserve_containers = Config.MCP_PRESERVE_CONTAINERS
+
         # Track containers that were reused to avoid cleanup
         self.reused_containers = set()
         # Secure file manager for handling secret files
@@ -323,6 +326,17 @@ class ContainerManager:
                 return clean_message(message)
 
         return None
+
+    def _image_exists(self, image_name: str) -> bool:
+        """Check if a Docker image exists locally."""
+        try:
+            self.docker_client.images.get(image_name)
+            return True
+        except ImageNotFound:
+            return False
+        except (APIError, ConnectionError, OSError) as e:
+            logger.debug(f"Failed to check image '{image_name}': {e}")
+            return False
 
     def _ensure_image_exists(self, image_name: str) -> None:
         """Checks if a Docker image exists locally and pulls it if not."""
@@ -667,7 +681,17 @@ class ContainerManager:
                             await session.commit()
                             continue
 
-                        # Container needs to be rebuilt
+                        existing_image_tag = server.image_tag or self.get_image_tag(server)
+                        if existing_image_tag and self._image_exists(existing_image_tag):
+                            logger.info(
+                                f"Found existing image {existing_image_tag} for {server.name}; reusing without rebuild"
+                            )
+                            server.image_tag = existing_image_tag
+                            server.build_status = "built"
+                            server.build_logs = f"Reusing image {existing_image_tag}"
+                            await session.commit()
+                            continue
+
                         logger.info(f"Building image for {server.name}...")
                         server.build_status = "building"
                         server.build_logs = "Building..."
@@ -698,22 +722,16 @@ class ContainerManager:
         if built_servers:
             logger.info(f"Mounting {len(built_servers)} built servers...")
 
-            # Clean up existing containers before mounting (skip reused ones)
-            for server in built_servers:
-                container_name = self._get_container_name(server.id)
-                if container_name in self.reused_containers:
-                    logger.debug(
-                        f"Skipping cleanup for reused container {container_name}"
-                    )
-                else:
-                    self._cleanup_existing_container(container_name)
-
             async with get_async_session() as db_session:
                 for server in built_servers:
-                    # Always clean up a potentially lingering container from a previous failed run
-                    self._cleanup_existing_container(
-                        self._get_container_name(server.id)
-                    )
+                    container_name = self._get_container_name(server.id)
+                    if container_name in self.reused_containers:
+                        logger.debug(
+                            f"Preserving running container {container_name} during mount"
+                        )
+                    else:
+                        self._cleanup_existing_container(container_name)
+
                     try:
                         # Add server to MCP manager and discover tools
                         discovered_tools = await mcp_manager.add_server(server)
@@ -759,22 +777,27 @@ class ContainerManager:
 
     async def cleanup_all_containers(self) -> None:
         """Clean up all MCP server containers during shutdown."""
+        cleanup_required = not (self.preserve_containers and not os.environ.get("PYTEST_CURRENT_TEST"))
+
         try:
-            # Get all active servers to find their container names
-            async with get_async_session() as session:
-                servers = await get_active_servers(session)
+            if not cleanup_required:
+                logger.info("Preserving containers between runs; skipping cleanup step.")
+            else:
+                # Get all active servers to find their container names
+                async with get_async_session() as session:
+                    servers = await get_active_servers(session)
 
-            if not servers:
-                logger.debug("No active servers found for cleanup.")
-                return
+                if not servers:
+                    logger.debug("No active servers found for cleanup.")
+                    return
 
-            logger.info(f"Cleaning up {len(servers)} server containers...")
+                logger.info(f"Cleaning up {len(servers)} server containers...")
 
-            for server in servers:
-                container_name = self._get_container_name(server.id)
-                self._cleanup_existing_container(container_name)
+                for server in servers:
+                    container_name = self._get_container_name(server.id)
+                    self._cleanup_existing_container(container_name)
 
-            logger.info("Container cleanup complete.")
+                logger.info("Container cleanup complete.")
 
         except Exception as e:
             logger.error(f"Error during container cleanup: {e}")
@@ -785,3 +808,4 @@ class ContainerManager:
                 logger.debug("Docker client connection closed.")
             except Exception as e:
                 logger.debug(f"Error closing docker client: {e}")
+

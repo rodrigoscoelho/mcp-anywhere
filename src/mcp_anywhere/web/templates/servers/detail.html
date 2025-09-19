@@ -19,6 +19,15 @@
                     </svg>
                     Edit Server
                 </a>
+                <form method="POST" action="/servers/{{ server.id }}/rebuild" class="inline">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center w-full bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 13a8 8 0 0113.856-5.856M20 11l.001 6M15 20l5-5"></path>
+                        </svg>
+                        Rebuild
+                    </button>
+                </form>
                 <form method="POST" action="/servers/{{ server.id }}/delete" 
                       onsubmit="return confirm('Are you sure you want to delete this server?')"
                       class="inline">
