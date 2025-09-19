@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.core.mcp_manager import create_mcp_config
+from mcp_anywhere.database import MCPServer
 
 
 def _make_manager() -> ContainerManager:
@@ -11,9 +13,12 @@ def _make_manager() -> ContainerManager:
 
 def test_parse_start_command_leaves_npx_commands_untouched() -> None:
     manager = _make_manager()
-    server = SimpleNamespace(
-        start_command="npx @playwright/mcp@latest",
-        runtime_type="npx",
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            start_command="npx @playwright/mcp@latest",
+            runtime_type="npx",
+        ),
     )
 
     result = manager._parse_start_command(server)
@@ -23,9 +28,12 @@ def test_parse_start_command_leaves_npx_commands_untouched() -> None:
 
 def test_parse_start_command_adds_stdio_for_builtin_cli() -> None:
     manager = _make_manager()
-    server = SimpleNamespace(
-        start_command="uv run mcp-anywhere serve",
-        runtime_type="uvx",
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            start_command="uv run mcp-anywhere serve",
+            runtime_type="uvx",
+        ),
     )
 
     result = manager._parse_start_command(server)
@@ -35,9 +43,12 @@ def test_parse_start_command_adds_stdio_for_builtin_cli() -> None:
 
 def test_parse_start_command_respects_explicit_transport() -> None:
     manager = _make_manager()
-    server = SimpleNamespace(
-        start_command="uvx mcp-anywhere serve http",
-        runtime_type="uvx",
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            start_command="uvx mcp-anywhere serve http",
+            runtime_type="uvx",
+        ),
     )
 
     result = manager._parse_start_command(server)
@@ -47,9 +58,12 @@ def test_parse_start_command_respects_explicit_transport() -> None:
 
 def test_parse_start_command_handles_stdio_flags() -> None:
     manager = _make_manager()
-    server = SimpleNamespace(
-        start_command="uvx fastmcp serve --stdio",
-        runtime_type="uvx",
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            start_command="uvx fastmcp serve --stdio",
+            runtime_type="uvx",
+        ),
     )
 
     result = manager._parse_start_command(server)
@@ -58,15 +72,18 @@ def test_parse_start_command_handles_stdio_flags() -> None:
 
 
 def test_create_mcp_config_sets_default_stdio_env() -> None:
-    server = SimpleNamespace(
-        id="test1234",
-        name="demo",
-        github_url="https://example.com/repo",
-        runtime_type="npx",
-        start_command="npx @scope/package",
-        install_command="",
-        env_variables=[],
-        secret_files=[],
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            id="test1234",
+            name="demo",
+            github_url="https://example.com/repo",
+            runtime_type="npx",
+            start_command="npx @scope/package",
+            install_command="",
+            env_variables=[],
+            secret_files=[],
+        ),
     )
 
     with (
