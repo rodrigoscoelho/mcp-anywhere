@@ -4,7 +4,17 @@ import uuid
 from datetime import datetime
 from typing import Any, AsyncContextManager, Sequence
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, select, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    select,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -150,6 +160,36 @@ class MCPServerSecretFile(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class ToolUsageLog(Base):
+    """Persist MCP tool usage events for analytics and troubleshooting."""
+
+    __tablename__ = "tool_usage_logs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    client_name: Mapped[str | None] = mapped_column(String(120))
+    request_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    server_id: Mapped[str | None] = mapped_column(String(8))
+    server_name: Mapped[str | None] = mapped_column(String(120))
+    tool_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    full_tool_name: Mapped[str] = mapped_column(String(220), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    processing_ms: Mapped[int | None] = mapped_column(Integer)
+    arguments: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    response: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ToolUsageLog {self.full_tool_name} status={self.status} "
+            f"at {self.timestamp.isoformat()}>"
+        )
 
 
 class AppSetting(Base):

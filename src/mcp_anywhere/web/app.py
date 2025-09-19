@@ -20,6 +20,7 @@ from mcp_anywhere.config import Config
 from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.core.mcp_manager import MCPManager
 from mcp_anywhere.core.middleware import ToolFilterMiddleware
+from mcp_anywhere.core.tool_usage_middleware import ToolUsageLoggingMiddleware
 from mcp_anywhere.database import close_db, get_async_session, init_db
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.settings_store import get_effective_setting
@@ -27,6 +28,7 @@ from mcp_anywhere.web import routes
 from mcp_anywhere.web.config_routes import config_routes
 from mcp_anywhere.web.api_token_routes import api_token_routes
 from mcp_anywhere.web.settings_routes import settings_routes
+from mcp_anywhere.web.log_routes import tool_usage_routes
 from mcp_anywhere.web.middleware import (
     MCPAuthMiddleware,
     RedirectMiddleware,
@@ -68,6 +70,7 @@ You can use tools/list to see all available tools from all mounted servers.
 """,
     )
     router.add_middleware(ToolFilterMiddleware())
+    router.add_middleware(ToolUsageLoggingMiddleware())
 
     testing_mode = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
@@ -140,6 +143,7 @@ You can use tools/list to see all available tools from all mounted servers.
             *secret_file_routes,
             *settings_routes,
             *api_token_routes,
+            *tool_usage_routes,
             *routes.routes,
             # Static files mount
             Mount(
