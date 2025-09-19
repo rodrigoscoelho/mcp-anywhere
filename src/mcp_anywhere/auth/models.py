@@ -171,6 +171,35 @@ class OAuth2Token(Base):
         }
 
 
+class APIToken(Base):
+    """API token for direct bearer authentication."""
+
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    token_prefix = Column(String(16), nullable=False, index=True)
+    token_hint = Column(String(12), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked = Column(Boolean, nullable=False, default=False)
+
+    def to_dict(self) -> dict:
+        """Convert token metadata to dictionary (never returns the raw token)."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "token_prefix": self.token_prefix,
+            "token_hint": self.token_hint,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "revoked": self.revoked,
+        }
+
+
 class OAuth2RefreshToken(Base):
     """Persistent storage for OAuth 2.0 refresh tokens."""
 

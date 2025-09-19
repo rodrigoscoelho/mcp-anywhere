@@ -11,6 +11,7 @@ from starlette.staticfiles import StaticFiles
 
 from mcp_anywhere.auth.initialization import initialize_oauth_data
 from mcp_anywhere.auth.provider import MCPAnywhereAuthProvider
+from mcp_anywhere.auth.api_tokens import APITokenService
 from mcp_anywhere.auth.routes import create_oauth_http_routes
 from mcp_anywhere.config import Config
 from mcp_anywhere.container.manager import ContainerManager
@@ -20,6 +21,7 @@ from mcp_anywhere.database import close_db, get_async_session, init_db
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.web import routes
 from mcp_anywhere.web.config_routes import config_routes
+from mcp_anywhere.web.api_token_routes import api_token_routes
 from mcp_anywhere.web.settings_routes import settings_routes
 from mcp_anywhere.web.middleware import (
     MCPAuthMiddleware,
@@ -86,6 +88,10 @@ You can use tools/list to see all available tools from all mounted servers.
         MCPAnywhereAuthProvider(get_async_session) if transport_mode == "http" else None
     )
 
+    api_token_service = (
+        APITokenService(get_async_session) if transport_mode == "http" else None
+    )
+
     # Configure middleware - Using SameSite cookies for CSRF protection (modern approach)
     middleware = [
         Middleware(
@@ -119,6 +125,7 @@ You can use tools/list to see all available tools from all mounted servers.
             *config_routes,
             *secret_file_routes,
             *settings_routes,
+            *api_token_routes,
             *routes.routes,
             # Static files mount
             Mount(
@@ -154,6 +161,7 @@ You can use tools/list to see all available tools from all mounted servers.
     app.state.container_manager = container_manager
     app.state.get_async_session = get_async_session
     app.state.transport_mode = transport_mode
+    app.state.api_token_service = api_token_service
 
     if oauth_provider:
         app.state.oauth_provider = oauth_provider

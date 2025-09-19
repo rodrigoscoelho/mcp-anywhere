@@ -47,6 +47,12 @@
                     </a>
                     {% if current_user is defined and current_user.is_authenticated %}
                     <div class="flex items-center space-x-3">
+                        <a href="/settings/api-keys" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 6h14M5 18h14"></path>
+                            </svg>
+                            API Tokens
+                        </a>
                         <a href="/settings/llm" class="inline-flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
                             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M4 6h16M4 18h16"></path>
@@ -87,6 +93,12 @@
                         Dashboard
                     </a>
                     {% if current_user is defined and current_user.is_authenticated %}
+                    <a href="/settings/api-keys" class="flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 6h14M5 18h14"></path>
+                        </svg>
+                        API Tokens
+                    </a>
                     <a href="/auth/change-password" class="flex items-center text-gray-600 hover:text-gray-900 font-medium transition-colors">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 2c-2.673 0-8 1.337-8 4v1h16v-1c0-2.663-5.327-4-8-4z"></path>

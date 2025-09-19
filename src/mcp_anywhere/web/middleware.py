@@ -5,6 +5,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.types import ASGIApp
 
+from mcp_anywhere.auth.api_tokens import APITokenService
 from mcp_anywhere.config import Config
 from mcp_anywhere.core.base_middleware import BasePathProtectionMiddleware
 from mcp_anywhere.logging_config import get_logger
@@ -134,6 +135,18 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = auth_header[7:]  # Remove 'Bearer ' prefix
+
+        # First try API token validation (direct bearer keys)
+        api_token_service: APITokenService | None = getattr(request.app.state, "api_token_service", None)
+        if api_token_service is not None:
+            try:
+                api_token = await api_token_service.validate(token)
+            except Exception:
+                logger.exception('Failed to validate API token')
+            else:
+                if api_token is not None:
+                    logger.debug('Authenticated request via API token id=%s', api_token.id)
+                    return await call_next(request)
 
         # Get OAuth provider from app state
         oauth_provider = getattr(request.app.state, "oauth_provider", None)
