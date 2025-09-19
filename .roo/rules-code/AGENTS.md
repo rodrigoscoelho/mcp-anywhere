@@ -1,0 +1,8 @@
+# AGENTS.md — Code mode (Non-Obvious Only)
+
+- Secret files: sempre use `SecureFileManager` para armazenar/recuperar arquivos sensíveis. A chave de encriptação dos arquivos está em `.data/secrets/.encryption_key` — trocar `Config.SECRET_KEY` não re-criptografa esses arquivos. See [`src/mcp_anywhere/security/file_manager.py`](src/mcp_anywhere/security/file_manager.py:45).
+- LLM config: nunca confie só em `Config.*` para escolhas de provedor/modelo — use `get_effective_setting(...)` (DB > ENV). A fábrica pode devolver `(None, model)` para preservar comportamento legado Anthropic; código chamador deve tratar essa possibilidade. See [`src/mcp_anywhere/llm/factory.py`](src/mcp_anywhere/llm/factory.py:29).
+- Encrypted app settings: `set_app_setting(..., encrypt=True)` grava ciphertext no DB; `get_effective_setting` irá descriptografar se necessário — rode com `Config.SECRET_KEY` compatível. See [`src/mcp_anywhere/settings_store.py`](src/mcp_anywhere/settings_store.py:21).
+- Evite modificar a estrutura de nomes de imagem/contêiner — imagens são `mcp-anywhere/server-{server.id}` e containers `mcp-{server_id}`; ContainerManager depende disso para detectar reutilização. See [`src/mcp_anywhere/container/manager.py`](src/mcp_anywhere/container/manager.py:148).
+- Ao adicionar chamadas de inicialização em testes, lembre-se que `PYTEST_CURRENT_TEST` ativa um modo que pula inicialização de containers — use isso para evitar dependências de Docker em testes de unidade. See [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:72).
+- Lint: Ruff já configurado com line-length 100 e ignores per-file (tests e __init__.py). Não altere sem atualizar [`pyproject.toml`](pyproject.toml:58).

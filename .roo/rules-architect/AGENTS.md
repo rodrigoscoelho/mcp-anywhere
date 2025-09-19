@@ -1,0 +1,7 @@
+# AGENTS.md — Architect mode (Non-Obvious Only)
+
+- FastMCP lifespan: FastMCP's generated HTTP app carries its own lifespan; the project intentionally uses that lifespan for Starlette when available. Avoid replacing or duplicating lifespan logic — see how `mcp_http_app.lifespan` is selected in [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:164).
+- Initialization order matters: DB init and OAuth seeding run before container initialization. ContainerManager builds/mounts servers only after OAuth/data ready — changing order causes startup failures. See [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:48) and container init at [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:82).
+- App state ownership: long-lived managers are stored on `app.state` (mcp_manager, container_manager, api_token_service). Tests expect these to exist or be None; do not relocate them. See [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:181).
+- Reset is destructive: `mcp-anywhere reset` removes `DATA_DIR` entirely (DB, keys, containers). Use with caution and prefer DB migrations for schema changes. See [`src/mcp_anywhere/__main__.py`](src/mcp_anywhere/__main__.py:158).
+- Transport-specific features: many subsystems (OAuth, API tokens, session middleware) are only enabled in HTTP transport. When adding features, gate them behind `transport_mode == "http"` to avoid test/stdio breakage. See [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:120).

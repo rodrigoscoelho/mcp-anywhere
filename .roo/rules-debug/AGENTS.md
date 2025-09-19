@@ -1,0 +1,7 @@
+# AGENTS.md — Debug mode (Non-Obvious Only)
+
+- Container logs: use ContainerManager.get_container_error_logs(server_id, tail=50) to retrieve recent stdout/stderr; `_extract_error_from_logs` attempts to extract a short readable cause via prioritized regexes. See [`src/mcp_anywhere/container/manager.py`](src/mcp_anywhere/container/manager.py:244).
+- Docker may be unavailable: ContainerManager falls back to a dummy client (`_NoDockerClient`) — container ops will be disabled but app keeps running. Expect NotFound/ImageNotFound errors when calling container APIs. See [`src/mcp_anywhere/container/manager.py`](src/mcp_anywhere/container/manager.py:132).
+- Secret-files for mounts: SecureFileManager.decrypts secret files to temporary files named `temp_<stored_filename>` under the server dir for container mounting — these files are created at runtime and must be removed to avoid leaks. See [`src/mcp_anywhere/security/file_manager.py`](src/mcp_anywhere/security/file_manager.py:179).
+- Tests skip container init when `PYTEST_CURRENT_TEST` is set — reproduce CI/test environment locally by setting this var to avoid Docker dependency. See [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:72).
+- Image/container naming is significant for reuse: images `mcp-anywhere/server-{server.id}`, containers `mcp-{server_id}` — changing this breaks reuse detection and cleanup logic. See [`src/mcp_anywhere/container/manager.py`](src/mcp_anywhere/container/manager.py:148).

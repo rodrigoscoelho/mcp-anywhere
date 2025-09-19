@@ -1,0 +1,7 @@
+# AGENTS.md — Ask mode (Non-Obvious Only)
+
+- UI auto-configuration: the web UI can "Analyze with Claude" (repo URL) to auto-populate server fields — the app expects those analyzer results to follow the project's field guidance. See docs and templates (instructions surfaced in the UI).  
+- Two LLM configuration sources: settings in DB (via settings_store) take precedence over ENV; callers should use `get_effective_setting(...)` instead of reading `Config.*` directly. See [`src/mcp_anywhere/settings_store.py`](src/mcp_anywhere/settings_store.py:71) and [`src/mcp_anywhere/llm/factory.py`](src/mcp_anywhere/llm/factory.py:42).
+- Secrets are managed separately from ENV: secret files are stored encrypted on disk under `.data/secrets` and are not affected by changing `Config.SECRET_KEY`. Use `SecureFileManager` to inspect or manipulate them. See [`src/mcp_anywhere/security/file_manager.py`](src/mcp_anywhere/security/file_manager.py:45).
+- Default servers config file: the app may load `default_servers.json` (path configurable via `DEFAULT_SERVERS_FILE` env). See [`env.example`](env.example:62).
+- Testing harness note (for reproducing behavior): tests create the app via `create_app(transport_mode="http")` and use `httpx.ASGITransport` (see [`tests/conftest.py`](tests/conftest.py:20) and [`src/mcp_anywhere/web/app.py`](src/mcp_anywhere/web/app.py:40)). This means running UI/route-level tests doesn't require starting a real HTTP server.
