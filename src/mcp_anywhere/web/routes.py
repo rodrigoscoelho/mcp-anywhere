@@ -13,6 +13,10 @@ from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.database import MCPServer, MCPServerTool, get_async_session
 from mcp_anywhere.database_utils import store_server_tools
 from mcp_anywhere.logging_config import get_logger
+from mcp_anywhere.server_guidance import (
+    CONTAINER_EXECUTION_NOTE,
+    FIELD_GUIDANCE,
+)
 from mcp_anywhere.web.forms import AnalyzeFormData, ServerFormData
 
 logger = get_logger(__name__)
@@ -46,6 +50,162 @@ def get_template_context(request: Request, **kwargs) -> dict:
         "transport_mode": transport_mode,
         **kwargs,
     }
+    return context
+
+
+def _get_form_value(source: ServerFormData | FormData | None, key: str) -> str | None:
+    """Extract a field value from form-like objects while preserving blanks."""
+    if source is None:
+        return None
+    if isinstance(source, ServerFormData):
+        value = getattr(source, key, None)
+    elif isinstance(source, FormData):
+        value = source.get(key)
+    elif hasattr(source, 'get'):
+        value = source.get(key)  # type: ignore[assignment]
+    else:
+        value = getattr(source, key, None)
+    return value if value is not None else None
+
+
+def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None) -> list[dict]:
+    """Normalize environment variables from posted form data."""
+    if form_data is None:
+        return []
+
+    if isinstance(form_data, ServerFormData):
+        env_vars: list[dict] = []
+        for env in form_data.env_variables:
+            env_vars.append(
+                {
+                    "key": env.get("key", ""),
+                    "value": env.get("value", ""),
+                    "description": env.get("description", ""),
+                    "required": bool(env.get("required", True)),
+                }
+            )
+        return env_vars
+
+    if isinstance(form_data, FormData):
+        env_vars: list[dict] = []
+
+        indices: set[int] = set()
+        for field_name in form_data.keys():
+            if field_name.startswith("env_key_"):
+                suffix = field_name.removeprefix("env_key_")
+                if suffix.isdigit():
+                    indices.add(int(suffix))
+
+        for index in sorted(indices):
+            key = (form_data.get(f"env_key_{index}") or "").strip()
+            value = form_data.get(f"env_value_{index}", "") or ""
+            description = form_data.get(f"env_desc_{index}", "") or ""
+            required_raw = (form_data.get(f"env_required_{index}") or "").lower()
+            required = required_raw == "true"
+            if key:
+                env_vars.append(
+                    {
+                        "key": key,
+                        "value": value,
+                        "description": description,
+                        "required": required,
+                    }
+                )
+
+        if env_vars:
+            return env_vars
+
+        try:
+            legacy_keys = form_data.getlist("env_keys[]")
+        except AttributeError:
+            legacy_keys = []
+        for raw_key in legacy_keys:
+            key = (raw_key or "").strip()
+            if not key:
+                continue
+            value = form_data.get(f"env_value_{raw_key}", "") or ""
+            description = form_data.get(f"env_desc_{raw_key}", "") or ""
+            required_raw = (form_data.get(f"env_required_{raw_key}") or "true").lower()
+            required = required_raw == "true"
+            env_vars.append(
+                {
+                    "key": key,
+                    "value": value,
+                    "description": description,
+                    "required": required,
+                }
+            )
+
+        return env_vars
+
+    # Unknown form type; return empty list
+    return []
+
+
+def build_add_server_context(
+    request: Request,
+    github_url: str | None = None,
+    analysis: dict | None = None,
+    form_data: ServerFormData | FormData | None = None,
+    errors: dict | None = None,
+    error: str | None = None,
+    warning: str | None = None,
+    mode: str | None = None,
+) -> dict:
+    """Build the template context for the add server page/partials."""
+    form_values = {
+        "github_url": github_url or "",
+        "name": "",
+        "description": "",
+        "runtime_type": "docker",
+        "install_command": "",
+        "start_command": "",
+    }
+
+    if analysis:
+        for key in ("name", "description", "runtime_type", "install_command", "start_command"):
+            if key in analysis and analysis[key] is not None:
+                form_values[key] = analysis[key] or ""
+
+    for key in form_values.keys():
+        value = _get_form_value(form_data, key)
+        if value is not None:
+            form_values[key] = value
+
+    env_entries = _extract_env_variables_from_form(form_data)
+    if not env_entries and analysis and analysis.get("env_variables"):
+        env_entries = [
+            {
+                "key": item.get("key", ""),
+                "value": "",
+                "description": item.get("description", ""),
+                "required": item.get("required", True),
+            }
+            for item in analysis.get("env_variables", [])
+            if item.get("key")
+        ]
+
+    mode_value = mode or _get_form_value(form_data, "config_mode") or "auto"
+    if isinstance(mode_value, str):
+        selected_mode = mode_value.lower()
+    else:
+        selected_mode = "auto"
+    if selected_mode not in {"auto", "manual"}:
+        selected_mode = "auto"
+
+    context = get_template_context(
+        request,
+        github_url=form_values["github_url"],
+        analysis=analysis,
+        form_values=form_values,
+        env_entries=env_entries,
+        field_guidance=FIELD_GUIDANCE,
+        container_note=CONTAINER_EXECUTION_NOTE,
+        config_mode=selected_mode,
+        errors=errors,
+        error=error,
+        warning=warning,
+    )
     return context
 
 
@@ -180,9 +340,10 @@ async def delete_server(request: Request) -> RedirectResponse | HTMLResponse:
 
 async def add_server_get(request: Request) -> HTMLResponse:
     """Display the add server form."""
-    return templates.TemplateResponse(
-        request, "servers/add.html", get_template_context(request)
-    )
+    mode_param = request.query_params.get("mode", "").lower()
+    initial_mode = mode_param if mode_param in {"auto", "manual"} else None
+    context = build_add_server_context(request, mode=initial_mode)
+    return templates.TemplateResponse(request, "servers/add.html", context)
 
 
 async def edit_server_get(request: Request) -> HTMLResponse:
@@ -348,39 +509,8 @@ async def edit_server_post(request: Request) -> HTMLResponse:
 
 
 async def create_server_post_form_data(form_data: FormData) -> ServerFormData:
-    """Create ServerFormData from form data, handling both old and new formats."""
-    env_variables = []
-
-    # First try the old format for backward compatibility
-    env_keys = form_data.getlist("env_keys[]")
-    for key in env_keys:
-        value = form_data.get(f"env_value_{key}", "")
-        description = form_data.get(f"env_desc_{key}", "")
-        if value:  # Only include env vars with values
-            env_variables.append(
-                {"key": key, "value": value, "description": description}
-            )
-    # New indexed format from analysis result template
-    i = 0
-    while True:
-        key = form_data.get(f"env_key_{i}")
-        if key is None:
-            break
-        value = form_data.get(f"env_value_{i}", "")
-        description = form_data.get(f"env_desc_{i}", "")
-        required = form_data.get(f"env_required_{i}", "false").lower() == "true"
-
-        if key.strip():  # Only include env vars with non-empty keys
-            env_variables.append(
-                {
-                    "key": key.strip(),
-                    "value": value,
-                    "description": description,
-                    "required": required,
-                }
-            )
-        i += 1
-    # Validate form data
+    """Create ServerFormData from form data, handling manual and analyzed inputs."""
+    env_variables = _extract_env_variables_from_form(form_data)
     server_data = ServerFormData(
         name=form_data.get("name", ""),
         github_url=form_data.get("github_url", ""),
@@ -448,7 +578,6 @@ async def handle_claude_connection_error(
     """Handle Claude analysis connection failures with fallback."""
     logger.warning(f"Claude analysis failed for {github_url}: {error}")
 
-    # Fallback to basic analysis if Claude fails
     analysis = {
         "name": "analyzed-server",
         "description": "Claude analysis unavailable - please fill manually",
@@ -459,28 +588,15 @@ async def handle_claude_connection_error(
 
     warning_msg = "Repository analysis failed. Please fill out the form manually."
 
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request,
-            "partials/analysis_result.html",
-            get_template_context(
-                request,
-                github_url=github_url,
-                analysis=analysis,
-                warning=warning_msg,
-            ),
-        )
-    else:
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(
-                request,
-                github_url=github_url,
-                analysis=analysis,
-                warning=warning_msg,
-            ),
-        )
+    context = build_add_server_context(
+        request, github_url=github_url, analysis=analysis, warning=warning_msg
+    )
+    template_name = (
+        "partials/analysis_result.html"
+        if request.headers.get("HX-Request")
+        else "servers/add.html"
+    )
+    return templates.TemplateResponse(request, template_name, context)
 
 
 async def handle_claude_config_error(
@@ -490,18 +606,15 @@ async def handle_claude_config_error(
     logger.error(f"Claude analyzer configuration error: {error}")
     error_msg = f"Repository analysis is not configured: {str(error)}. Please check your ANTHROPIC_API_KEY."
 
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request,
-            "partials/analysis_result.html",
-            get_template_context(request, github_url=github_url, error=error_msg),
-        )
-    else:
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(request, github_url=github_url, error=error_msg),
-        )
+    context = build_add_server_context(
+        request, github_url=github_url, error=error_msg
+    )
+    template_name = (
+        "partials/analysis_result.html"
+        if request.headers.get("HX-Request")
+        else "servers/add.html"
+    )
+    return templates.TemplateResponse(request, template_name, context)
 
 
 async def handle_claude_unexpected_error(
@@ -511,18 +624,15 @@ async def handle_claude_unexpected_error(
     logger.error(f"Unexpected error during analysis: {error}")
     error_msg = f"Analysis failed: {str(error)}"
 
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request,
-            "partials/analysis_result.html",
-            get_template_context(request, github_url=github_url, error=error_msg),
-        )
-    else:
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(request, github_url=github_url, error=error_msg),
-        )
+    context = build_add_server_context(
+        request, github_url=github_url, error=error_msg
+    )
+    template_name = (
+        "partials/analysis_result.html"
+        if request.headers.get("HX-Request")
+        else "servers/add.html"
+    )
+    return templates.TemplateResponse(request, template_name, context)
 
 
 async def handle_analyze_validation_error(
@@ -535,26 +645,18 @@ async def handle_analyze_validation_error(
         field = err["loc"][0]
         errors[field] = [err["msg"]]
 
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request,
-            "partials/analysis_result.html",
-            get_template_context(
-                request,
-                github_url=form_data.get("github_url", ""),
-                errors=errors,
-            ),
-        )
-    else:
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(
-                request,
-                github_url=form_data.get("github_url", ""),
-                errors=errors,
-            ),
-        )
+    context = build_add_server_context(
+        request,
+        github_url=form_data.get("github_url", ""),
+        form_data=form_data,
+        errors=errors,
+    )
+    template_name = (
+        "partials/analysis_result.html"
+        if request.headers.get("HX-Request")
+        else "servers/add.html"
+    )
+    return templates.TemplateResponse(request, template_name, context)
 
 
 async def handle_analyze_general_error(
@@ -564,26 +666,18 @@ async def handle_analyze_general_error(
     logger.error(f"Unexpected error in analyze handler: {error}")
     error_msg = f"Unexpected error: {str(error)}"
 
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request,
-            "partials/analysis_result.html",
-            get_template_context(
-                request,
-                github_url=form_data.get("github_url", ""),
-                error=error_msg,
-            ),
-        )
-    else:
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(
-                request,
-                github_url=form_data.get("github_url", ""),
-                error=error_msg,
-            ),
-        )
+    context = build_add_server_context(
+        request,
+        github_url=form_data.get("github_url", ""),
+        form_data=form_data,
+        error=error_msg,
+    )
+    template_name = (
+        "partials/analysis_result.html"
+        if request.headers.get("HX-Request")
+        else "servers/add.html"
+    )
+    return templates.TemplateResponse(request, template_name, context)
 
 
 async def handle_analyze_repository(request: Request, form_data) -> HTMLResponse:
@@ -602,26 +696,18 @@ async def handle_analyze_repository(request: Request, form_data) -> HTMLResponse
             logger.info("Analysis completed successfully")
 
             # Check if this is an HTMX request
-            if request.headers.get("HX-Request"):
-                return templates.TemplateResponse(
-                    request,
-                    "partials/analysis_result.html",
-                    get_template_context(
-                        request,
-                        github_url=analyze_data.github_url,
-                        analysis=analysis,
-                    ),
-                )
-            else:
-                return templates.TemplateResponse(
-                    request,
-                    "servers/add.html",
-                    get_template_context(
-                        request,
-                        github_url=analyze_data.github_url,
-                        analysis=analysis,
-                    ),
-                )
+            context = build_add_server_context(
+                request,
+                github_url=analyze_data.github_url,
+                analysis=analysis,
+                form_data=form_data,
+            )
+            template_name = (
+                "partials/analysis_result.html"
+                if request.headers.get("HX-Request")
+                else "servers/add.html"
+            )
+            return templates.TemplateResponse(request, template_name, context)
 
         except ConnectionError as e:
             return await handle_claude_connection_error(
@@ -730,22 +816,18 @@ async def handle_save_server(request: Request, form_data) -> HTMLResponse:
             field = error["loc"][0]
             errors[field] = [error["msg"]]
 
-        return templates.TemplateResponse(
-            request,
-            "servers/add.html",
-            get_template_context(request, form_data=form_data, errors=errors),
+        context = build_add_server_context(
+            request, form_data=form_data, errors=errors
         )
+        return templates.TemplateResponse(request, "servers/add.html", context)
 
     except IntegrityError:
-        return templates.TemplateResponse(
+        context = build_add_server_context(
             request,
-            "servers/add.html",
-            get_template_context(
-                request,
-                form_data=form_data,
-                error="A server with this name already exists.",
-            ),
+            form_data=form_data,
+            error="A server with this name already exists.",
         )
+        return templates.TemplateResponse(request, "servers/add.html", context)
 
     except (
         RuntimeError,
@@ -754,15 +836,12 @@ async def handle_save_server(request: Request, form_data) -> HTMLResponse:
         IntegrityError,
     ) as e:
         logger.exception(f"Error saving server: {e}")
-        return templates.TemplateResponse(
+        context = build_add_server_context(
             request,
-            "servers/add.html",
-            get_template_context(
-                request,
-                form_data=form_data,
-                error="Error saving server. Please try again.",
-            ),
+            form_data=form_data,
+            error="Error saving server. Please try again.",
         )
+        return templates.TemplateResponse(request, "servers/add.html", context)
 
 
 async def add_server_post(request: Request) -> HTMLResponse:
@@ -778,9 +857,8 @@ async def add_server_post(request: Request) -> HTMLResponse:
         return await handle_save_server(request, form_data)
 
     # Invalid form submission
-    return templates.TemplateResponse(
-        request, "servers/add.html", get_template_context(request, form_data=form_data)
-    )
+    context = build_add_server_context(request, form_data=form_data)
+    return templates.TemplateResponse(request, "servers/add.html", context)
 
 
 async def add_server(request: Request) -> HTMLResponse:

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import re
 from typing import Any
+from textwrap import dedent
 
 import httpx
 from anthropic import Anthropic, AnthropicError
@@ -19,6 +20,16 @@ from mcp_anywhere.llm.factory import get_provider_and_model, PROVIDER_OPENROUTER
 
 from mcp_anywhere.config import Config
 from mcp_anywhere.logging_config import get_logger
+from mcp_anywhere.server_guidance import (
+    CONTAINER_EXECUTION_NOTE,
+    DESCRIPTION_GUIDANCE,
+    ENV_GUIDANCE,
+    ENV_SECRET_WARNING,
+    INSTALL_GUIDANCE,
+    NAME_GUIDANCE,
+    RUNTIME_GUIDANCE,
+    START_GUIDANCE,
+)
 
 logger = get_logger(__name__)
 
@@ -177,67 +188,63 @@ class AsyncClaudeAnalyzer:
             logger.warning(f"Could not fetch {path} from {owner}/{repo}: {e}")
             return None
 
-    def _build_prompt(
-        self, url: str, readme: str | None, pkg_json: str | None, pyproject: str | None
-    ) -> str:
+    def _build_prompt(self, url: str, readme: str | None, pkg_json: str | None, pyproject: str | None) -> str:
         """Constructs the prompt for the Claude API call."""
-        return f"""
-Analyze the following MCP server repository to determine its configuration.
+        def _indent_followup(text: str) -> str:
+            return text.replace("
+", "
+   ")
 
-Repository URL: {url}
+        runtime_guidance = _indent_followup(RUNTIME_GUIDANCE)
+        install_guidance = _indent_followup(INSTALL_GUIDANCE)
+        start_guidance = _indent_followup(START_GUIDANCE)
+        name_guidance = _indent_followup(NAME_GUIDANCE)
+        description_guidance = _indent_followup(DESCRIPTION_GUIDANCE)
+        env_guidance = _indent_followup(ENV_GUIDANCE)
+        env_warning = _indent_followup(ENV_SECRET_WARNING)
 
-Here are the contents of key files:
+        return dedent(f"""
+        Analyze the following MCP server repository to determine its configuration.
 
-<file path="README.md">
-{readme or "Not found."}
-</file>
+        Repository URL: {url}
 
-<file path="package.json">
-{pkg_json or "Not found."}
-</file>
+        Here are the contents of key files:
 
-<file path="pyproject.toml">
-{pyproject or "Not found."}
-</file>
+        <file path="README.md">
+        {readme or "Not found."}
+        </file>
 
-Based on the file contents, extract the following information. Be precise and concise.
+        <file path="package.json">
+        {pkg_json or "Not found."}
+        </file>
 
-IMPORTANT: The servers will run in containerized environments. Provide the full, actual commands that would be used to install and run the server.
+        <file path="pyproject.toml">
+        {pyproject or "Not found."}
+        </file>
 
-1. **Runtime type**: Determine if this is 'npx' (for Node.js) or 'uvx' (for Python). Prioritize `pyproject.toml` for Python projects and `package.json` for Node.js projects.
+        Based on the file contents, extract the following information. Be precise and concise.
 
-  2. Install command: The full command to install the package/dependencies. This command will be run during the container build
-  process.
-  - For npx packages: "npm install -g @org/package" (e.g., "npm install -g @modelcontextprotocol/server-filesystem")
-  - For uvx packages: "uv tool install package-name" (e.g., "uv tool install mcp-server-git")
+        {CONTAINER_EXECUTION_NOTE}
 
-  3. Start command: The full command to run the server. This is the exact command you would type to start the server.
-  - For npx: "npx @org/package" (e.g., "npx @modelcontextprotocol/server-filesystem")
-  - For uvx: "uvx package-name" (e.g., "uvx mcp-server-git")
+        1. **Runtime type**: {runtime_guidance}
+        2. Install command: {install_guidance}
+        3. Start command: {start_guidance}
+        4. **Server name**: {name_guidance}
+        5. **Description**: {description_guidance}
+        6. **Environment Variables**: {env_guidance}
+           {env_warning}
 
-4. **Server name**: A short, descriptive, machine-readable name for the server (e.g., "financial-data-api").
+        Respond in this exact, parsable format. Do not add any conversational text or pleasantries.
 
-5. **Description**: A brief, one-sentence description of the server's purpose.
-
-6. **Environment Variables**: List any required environment variables, their purpose, and if they are required.
-   IMPORTANT: DO NOT include environment variables that point to secret file locations such as:
-   - GOOGLE_APPLICATION_CREDENTIALS
-   - AWS_SHARED_CREDENTIALS_FILE
-   - KUBECONFIG
-   - Any variable ending in _FILE, _PATH, _CERT, _KEY, or _CREDENTIALS that refers to a file path
-   These file-based secrets should be configured through the secrets interface, not as environment variables.
-
-Respond in this exact, parsable format. Do not add any conversational text or pleasantries.
-
-RUNTIME: [npx|uvx]
-INSTALL: [full install command]
-START: [full start command]
-NAME: [server name]
-DESCRIPTION: [one-line description]
-ENV_VARS:
-- KEY: [key name], DESC: [description], REQUIRED: [true|false]
-- KEY: [key name], DESC: [description], REQUIRED: [true|false]
-"""
+        RUNTIME: [npx|uvx]
+        INSTALL: [full install command]
+        START: [full start command]
+        NAME: [server name]
+        DESCRIPTION: [one-line description]
+        ENV_VARS:
+        - KEY: [key name], DESC: [description], REQUIRED: [true|false]
+        - KEY: [key name], DESC: [description], REQUIRED: [true|false]
+        """).strip()
 
     def _parse_claude_response(self, text: str) -> dict[str, Any]:
         """Parse Claude's structured response into a dictionary."""
