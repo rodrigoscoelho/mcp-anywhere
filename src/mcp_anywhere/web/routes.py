@@ -1,8 +1,10 @@
+from typing import Any, Mapping
+
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from starlette.datastructures import FormData
+from starlette.datastructures import FormData, UploadFile
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
@@ -26,9 +28,9 @@ templates = Jinja2Templates(directory="src/mcp_anywhere/web/templates")
 class CurrentUser:
     """Simple current user object for template context."""
 
-    def __init__(self, user_id: str = None, username: str = None) -> None:
-        self.user_id = user_id
-        self.username = username
+    def __init__(self, user_id: str | None = None, username: str | None = None) -> None:
+        self.user_id: str | None = user_id
+        self.username: str | None = username
         self.is_authenticated = bool(user_id)
 
 
@@ -39,12 +41,12 @@ def get_current_user(request: Request) -> CurrentUser:
     return CurrentUser(user_id, username)
 
 
-def get_template_context(request: Request, **kwargs) -> dict:
+def get_template_context(request: Request, **kwargs) -> dict[str, Any]:
     """Get base template context with current user and transport mode."""
     # Get transport mode from app state
     transport_mode = getattr(request.app.state, "transport_mode", "http")
 
-    context = {
+    context: dict[str, Any] = {
         "request": request,
         "current_user": get_current_user(request),
         "transport_mode": transport_mode,
@@ -53,28 +55,45 @@ def get_template_context(request: Request, **kwargs) -> dict:
     return context
 
 
+# Utility helpers ---------------------------------------------------------
+
+def _as_optional_str(value: Any) -> str | None:
+    """Coerce form-like values to optional strings."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, UploadFile):
+        return value.filename
+    return None
+
+
+def _coerce_str(value: Any, default: str = "") -> str:
+    """Return a string for form values, falling back to a default."""
+    text = _as_optional_str(value)
+    return text if text is not None else default
+
+
 def _get_form_value(source: ServerFormData | FormData | None, key: str) -> str | None:
     """Extract a field value from form-like objects while preserving blanks."""
     if source is None:
         return None
     if isinstance(source, ServerFormData):
         value = getattr(source, key, None)
-    elif isinstance(source, FormData):
-        value = source.get(key)
-    elif hasattr(source, 'get'):
-        value = source.get(key)  # type: ignore[assignment]
-    else:
-        value = getattr(source, key, None)
-    return value if value is not None else None
+        return value if isinstance(value, str) else None
+    if isinstance(source, FormData):
+        return _as_optional_str(source.get(key))
+    if isinstance(source, Mapping):
+        return _as_optional_str(source.get(key))
+    attr = getattr(source, key, None)
+    return attr if isinstance(attr, str) else None
 
 
-def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None) -> list[dict]:
+def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None) -> list[dict[str, Any]]:
     """Normalize environment variables from posted form data."""
     if form_data is None:
         return []
 
     if isinstance(form_data, ServerFormData):
-        env_vars: list[dict] = []
+        env_vars: list[dict[str, Any]] = []
         for env in form_data.env_variables:
             env_vars.append(
                 {
@@ -87,7 +106,7 @@ def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None
         return env_vars
 
     if isinstance(form_data, FormData):
-        env_vars: list[dict] = []
+        env_vars: list[dict[str, Any]] = []
 
         indices: set[int] = set()
         for field_name in form_data.keys():
@@ -97,10 +116,13 @@ def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None
                     indices.add(int(suffix))
 
         for index in sorted(indices):
-            key = (form_data.get(f"env_key_{index}") or "").strip()
-            value = form_data.get(f"env_value_{index}", "") or ""
-            description = form_data.get(f"env_desc_{index}", "") or ""
-            required_raw = (form_data.get(f"env_required_{index}") or "").lower()
+            raw_key = _as_optional_str(form_data.get(f"env_key_{index}"))
+            key = raw_key.strip() if raw_key else ""
+            raw_value = _as_optional_str(form_data.get(f"env_value_{index}"))
+            value = raw_value if raw_value is not None else ""
+            raw_description = _as_optional_str(form_data.get(f"env_desc_{index}"))
+            description = raw_description if raw_description is not None else ""
+            required_raw = (_as_optional_str(form_data.get(f"env_required_{index}")) or "").lower()
             required = required_raw == "true"
             if key:
                 env_vars.append(
@@ -120,12 +142,14 @@ def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None
         except AttributeError:
             legacy_keys = []
         for raw_key in legacy_keys:
-            key = (raw_key or "").strip()
+            if not isinstance(raw_key, str):
+                continue
+            key = raw_key.strip()
             if not key:
                 continue
-            value = form_data.get(f"env_value_{raw_key}", "") or ""
-            description = form_data.get(f"env_desc_{raw_key}", "") or ""
-            required_raw = (form_data.get(f"env_required_{raw_key}") or "true").lower()
+            value = _coerce_str(form_data.get(f"env_value_{raw_key}"))
+            description = _coerce_str(form_data.get(f"env_desc_{raw_key}"))
+            required_raw = (_as_optional_str(form_data.get(f"env_required_{raw_key}")) or "true").lower()
             required = required_raw == "true"
             env_vars.append(
                 {
@@ -151,7 +175,7 @@ def build_add_server_context(
     error: str | None = None,
     warning: str | None = None,
     mode: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build the template context for the add server page/partials."""
     form_values = {
         "github_url": github_url or "",
@@ -381,7 +405,7 @@ async def edit_server_get(request: Request) -> HTMLResponse:
         )
 
 
-async def edit_server_post(request: Request) -> HTMLResponse:
+async def edit_server_post(request: Request) -> Response:
     """Handle edit server form submission."""
     server_id = request.path_params["server_id"]
     form_data = await request.form()
@@ -512,12 +536,12 @@ async def create_server_post_form_data(form_data: FormData) -> ServerFormData:
     """Create ServerFormData from form data, handling manual and analyzed inputs."""
     env_variables = _extract_env_variables_from_form(form_data)
     server_data = ServerFormData(
-        name=form_data.get("name", ""),
-        github_url=form_data.get("github_url", ""),
-        description=form_data.get("description", ""),
-        runtime_type=form_data.get("runtime_type", ""),
-        install_command=form_data.get("install_command", ""),
-        start_command=form_data.get("start_command", ""),
+        name=_coerce_str(form_data.get("name")),
+        github_url=_coerce_str(form_data.get("github_url")),
+        description=_as_optional_str(form_data.get("description")),
+        runtime_type=_coerce_str(form_data.get("runtime_type")),
+        install_command=_as_optional_str(form_data.get("install_command")),
+        start_command=_coerce_str(form_data.get("start_command")),
         env_variables=env_variables,
     )
     return server_data
@@ -647,7 +671,7 @@ async def handle_analyze_validation_error(
 
     context = build_add_server_context(
         request,
-        github_url=form_data.get("github_url", ""),
+        github_url=_coerce_str(form_data.get("github_url")),
         form_data=form_data,
         errors=errors,
     )
@@ -668,7 +692,7 @@ async def handle_analyze_general_error(
 
     context = build_add_server_context(
         request,
-        github_url=form_data.get("github_url", ""),
+        github_url=_coerce_str(form_data.get("github_url")),
         form_data=form_data,
         error=error_msg,
     )
@@ -682,9 +706,9 @@ async def handle_analyze_general_error(
 
 async def handle_analyze_repository(request: Request, form_data) -> HTMLResponse:
     """Handle repository analysis request."""
-    logger.info(f"Analyze button clicked for URL: {form_data.get('github_url', '')}")
+    logger.info(f"Analyze button clicked for URL: {_coerce_str(form_data.get('github_url'))}")
     try:
-        analyze_data = AnalyzeFormData(github_url=form_data.get("github_url", ""))
+        analyze_data = AnalyzeFormData(github_url=_coerce_str(form_data.get("github_url")))
         logger.info("Form data validated successfully")
 
         # Use the real Claude analyzer
@@ -735,7 +759,7 @@ async def handle_analyze_repository(request: Request, form_data) -> HTMLResponse
         )
 
 
-async def handle_save_server(request: Request, form_data) -> HTMLResponse:
+async def handle_save_server(request: Request, form_data) -> Response:
     """Handle server save request."""
     try:
         # Handle environment variables from form (new indexed format)
@@ -844,7 +868,7 @@ async def handle_save_server(request: Request, form_data) -> HTMLResponse:
         return templates.TemplateResponse(request, "servers/add.html", context)
 
 
-async def add_server_post(request: Request) -> HTMLResponse:
+async def add_server_post(request: Request) -> Response:
     """Handle add server form submission."""
     form_data = await request.form()
 
@@ -861,7 +885,7 @@ async def add_server_post(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "servers/add.html", context)
 
 
-async def add_server(request: Request) -> HTMLResponse:
+async def add_server(request: Request) -> Response:
     """Handle both GET and POST for /servers/add."""
     if request.method == "GET":
         return await add_server_get(request)

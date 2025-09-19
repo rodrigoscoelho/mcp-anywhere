@@ -158,9 +158,13 @@ class AsyncClaudeAnalyzer:
         )
 
         # Extract text content from the first content block
-        if hasattr(message.content[0], "text"):
-            return message.content[0].text
-        return str(message.content[0])
+        if not message.content:
+            return ""
+        content_block = message.content[0]
+        text_value = getattr(content_block, "text", None)
+        if isinstance(text_value, str):
+            return text_value
+        return str(content_block)
 
     @retry(
         stop=stop_after_attempt(3),
