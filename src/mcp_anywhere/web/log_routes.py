@@ -41,7 +41,7 @@ async def tool_usage_dashboard(request: Request) -> Response:
     view_model = _prepare_view_model(logs)
 
     context = get_template_context(request, **view_model)
-    return templates.TemplateResponse("logs/tool_usage.html", context)
+    return templates.TemplateResponse(request, "logs/tool_usage.html", context)
 
 
 async def tool_usage_detail(request: Request) -> Response:
@@ -59,8 +59,9 @@ async def tool_usage_detail(request: Request) -> Response:
 
     detail = _build_detail_view(log_entry)
     return templates.TemplateResponse(
+        request,
         "logs/tool_usage_detail.html",
-        {"request": request, "log": detail},
+        {"log": detail},
     )
 
 
@@ -110,7 +111,7 @@ def _prepare_view_model(logs) -> dict[str, Any]:
             {
                 "date": date_key,
                 "date_label": date_key.strftime("%B %d, %Y"),
-                "items": sorted(items, key=lambda item: item["time"], reverse=True),
+                "entries": sorted(items, key=lambda item: item["time"], reverse=True),
             }
         )
 
@@ -128,6 +129,7 @@ def _prepare_view_model(logs) -> dict[str, Any]:
         "grouped_logs": grouped_logs,
         "summary": summary_list,
         "last_updated": last_updated,
+        "total_count": len(logs),
     }
 
 

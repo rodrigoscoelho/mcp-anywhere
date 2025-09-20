@@ -159,6 +159,8 @@ ehthumbs.db
 # Application specific
 mcp_anywhere.db
 logs/
+!src/mcp_anywhere/web/templates/logs/
+!src/mcp_anywhere/web/templates/logs/*
 *.log
 .cursorrules
 .cursorignore

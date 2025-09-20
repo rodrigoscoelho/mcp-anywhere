@@ -1,0 +1,80 @@
+<div class="bg-white rounded-2xl shadow-2xl border border-gray-200">
+    <div class="flex items-start justify-between px-6 py-5 border-b border-gray-200">
+        <div>
+            <p class="text-xs uppercase tracking-wide text-gray-500">{{ log.request_type }}</p>
+            <h2 class="text-2xl font-semibold text-gray-900">{{ log.full_tool_name }}</h2>
+            <p class="text-sm text-gray-500 mt-1">{{ log.timestamp }}</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
+                {% if log.status.lower() == 'success' %}bg-green-100 text-green-700{% else %}bg-red-100 text-red-700{% endif %}">
+                {{ log.status.title() }}
+            </span>
+            <button type="button" onclick="closeLogDetail()"
+                    class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">
+                <span class="sr-only">Close</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="px-6 py-5 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <dl class="bg-gray-50 rounded-lg p-4 space-y-1">
+                <dt class="text-xs uppercase text-gray-500">Server</dt>
+                <dd class="text-sm font-medium text-gray-900">{{ log.server_name or 'Unknown server' }}</dd>
+            </dl>
+            <dl class="bg-gray-50 rounded-lg p-4 space-y-1">
+                <dt class="text-xs uppercase text-gray-500">Client</dt>
+                <dd class="text-sm font-medium text-gray-900">{{ log.client_name or 'Not available' }}</dd>
+            </dl>
+            <dl class="bg-gray-50 rounded-lg p-4 space-y-1">
+                <dt class="text-xs uppercase text-gray-500">Processing Time</dt>
+                <dd class="text-sm font-medium text-gray-900">
+                    {% if log.processing_ms is not none %}
+                        {{ log.processing_ms }} ms
+                    {% else %}
+                        Not captured
+                    {% endif %}
+                </dd>
+            </dl>
+            <dl class="bg-gray-50 rounded-lg p-4 space-y-1">
+                <dt class="text-xs uppercase text-gray-500">Log ID</dt>
+                <dd class="text-xs font-mono text-gray-700 break-all">{{ log.id }}</dd>
+            </dl>
+        </div>
+
+        <section>
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-gray-900">Request Parameters</h3>
+                <button type="button" data-copy-target="log-request-json"
+                        class="text-xs font-medium text-blue-600 hover:text-blue-700">Copy</button>
+            </div>
+            <pre id="log-request-json" class="bg-gray-900 text-gray-100 text-xs rounded-lg p-4 overflow-x-auto">{{ log.arguments_json | e }}</pre>
+        </section>
+
+        <section>
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-gray-900">Response Data</h3>
+                <button type="button" data-copy-target="log-response-json"
+                        class="text-xs font-medium text-blue-600 hover:text-blue-700">Copy</button>
+            </div>
+            <pre id="log-response-json" class="bg-gray-900 text-gray-100 text-xs rounded-lg p-4 overflow-x-auto">{{ log.response_json | e }}</pre>
+        </section>
+
+        <section>
+            <h3 class="text-sm font-semibold text-gray-900 mb-2">Error Message</h3>
+            {% if log.error_message %}
+                <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">
+                    {{ log.error_message }}
+                </div>
+            {% else %}
+                <div class="bg-gray-50 border border-gray-200 text-gray-600 text-sm rounded-lg p-4">
+                    No error information recorded.
+                </div>
+            {% endif %}
+        </section>
+    </div>
+</div>
