@@ -49,12 +49,11 @@
         <div class="bg-white rounded-lg shadow p-6">
             <h3 class="text-lg font-semibold mb-4">Status</h3>
             <div class="space-y-3">
-                <div class="flex justify-between items-center">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <span class="text-gray-600">Server Status:</span>
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
-                        {% if server.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                        {% if server.is_active %}Active{% else %}Inactive{% endif %}
-                    </span>
+                    <div class="sm:ml-4">
+                        {% include "partials/server_toggle.html" with server=server, layout='detail', redirect_to='/servers/' ~ server.id %}
+                    </div>
                 </div>
                 <div class="flex justify-between items-center">
                     <span class="text-gray-600">Build Status:</span>

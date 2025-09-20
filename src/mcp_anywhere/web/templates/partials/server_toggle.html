@@ -1,0 +1,25 @@
+{% set layout = layout or 'default' %}
+{% set active = server.is_active %}
+<div class="{% if layout == 'card' %}flex items-center justify-between gap-3{% else %}flex items-center justify-between gap-4{% endif %}"
+     id="server-status-toggle-{{ server.id }}">
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+        {% if active %}Active{% else %}Inactive{% endif %}
+    </span>
+    <form hx-post="/servers/{{ server.id }}/toggle"
+          hx-target="#server-status-toggle-{{ server.id }}"
+          hx-swap="outerHTML"
+          class="flex items-center">
+        <input type="hidden" name="redirect_to" value="{{ redirect_to or request.url.path }}">
+        <input type="hidden" name="layout" value="{{ layout }}">
+        <button type="submit"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 {% if active %}bg-green-500{% else %}bg-gray-300{% endif %}"
+                aria-pressed="{{ 'true' if active else 'false' }}"
+                aria-label="Toggle server {{ server.name }}">
+            <span class="sr-only">Toggle server {{ server.name }}</span>
+            <span class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 {% if active %}translate-x-5{% else %}translate-x-1{% endif %}"></span>
+        </button>
+    </form>
+</div>
+{% if toggle_error %}
+    <p class="mt-2 text-xs text-red-600">{{ toggle_error }}</p>
+{% endif %}

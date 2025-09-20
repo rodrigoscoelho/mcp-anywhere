@@ -80,6 +80,67 @@ async def test_tool_filter_middleware_filters_disabled_tools():
 
 
 @pytest.mark.asyncio
+async def test_tool_filter_middleware_preserves_mapping_when_no_disabled():
+    """Mappings from FastMCP should pass through unchanged when nothing is disabled."""
+
+    middleware = ToolFilterMiddleware()
+
+    class DummyTool:
+        def __init__(self, name: str):
+            self.name = name
+            self.description = "desc"
+
+    tools = {
+        "first": DummyTool("first"),
+        "second": DummyTool("second"),
+    }
+
+    mock_context = Mock()
+    mock_call_next = AsyncMock(return_value=tools)
+
+    with patch.object(
+        ToolFilterMiddleware,
+        "_get_disabled_tools_async",
+        new=AsyncMock(return_value=set()),
+    ):
+        result = await middleware.on_list_tools(mock_context, mock_call_next)
+
+    assert result is tools
+    assert set(result.keys()) == {"first", "second"}
+
+
+@pytest.mark.asyncio
+async def test_tool_filter_middleware_filters_disabled_from_mapping():
+    """Mappings returned by FastMCP should filter keys by tool enablement."""
+
+    middleware = ToolFilterMiddleware()
+
+    class DummyTool:
+        def __init__(self, name: str):
+            self.name = name
+            self.description = "desc"
+
+    tools = {
+        "enabled_tool": DummyTool("enabled_tool"),
+        "disabled_tool": DummyTool("disabled_tool"),
+    }
+
+    mock_context = Mock()
+    mock_call_next = AsyncMock(return_value=tools)
+
+    with patch.object(
+        ToolFilterMiddleware,
+        "_get_disabled_tools_async",
+        new=AsyncMock(return_value={"disabled_tool"}),
+    ):
+        result = await middleware.on_list_tools(mock_context, mock_call_next)
+
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"enabled_tool"}
+    assert result["enabled_tool"] is tools["enabled_tool"]
+
+
+@pytest.mark.asyncio
 async def test_get_disabled_tools_from_database():
     """
     Test that disabled tools are correctly queried from the database using a real test database.

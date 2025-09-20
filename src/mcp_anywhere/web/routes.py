@@ -1,4 +1,5 @@
 from typing import Any, Mapping
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -166,6 +167,19 @@ def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None
     return []
 
 
+def _with_query_params(url: str, **params: str) -> str:
+    """Return *url* with updated query parameters."""
+
+    parsed = urlparse(url)
+    existing = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key, value in params.items():
+        if value is None:
+            continue
+        existing[key] = value
+    new_query = urlencode(existing)
+    return urlunparse(parsed._replace(query=new_query))
+
+
 def build_add_server_context(
     request: Request,
     github_url: str | None = None,
@@ -242,18 +256,24 @@ async def homepage(request: Request) -> HTMLResponse:
     """Renders the homepage, displaying a list of configured MCP servers."""
     try:
         async with get_async_session() as db_session:
-            # Query all active servers with their tools
             stmt = (
                 select(MCPServer)
                 .options(selectinload(MCPServer.tools))
-                .where(MCPServer.is_active)
-                .order_by(MCPServer.name)
+                .order_by(MCPServer.is_active.desc(), MCPServer.name)
             )
             result = await db_session.execute(stmt)
             servers = result.scalars().all()
 
+        error_message = request.query_params.get("error")
+
         return templates.TemplateResponse(
-            request, "index.html", get_template_context(request, servers=servers)
+            request,
+            "index.html",
+            get_template_context(
+                request,
+                servers=servers,
+                error=error_message,
+            ),
         )
 
     except (RuntimeError, ValueError, ConnectionError) as e:
@@ -545,6 +565,104 @@ async def create_server_post_form_data(form_data: FormData) -> ServerFormData:
         env_variables=env_variables,
     )
     return server_data
+
+
+async def toggle_server(request: Request) -> Response:
+    """Toggle a server's active state and update mounts accordingly."""
+
+    if request.method != "POST":
+        return RedirectResponse(url="/", status_code=302)
+
+    server_id = request.path_params.get("server_id")
+    if not server_id:
+        return RedirectResponse(url="/", status_code=302)
+
+    form = await request.form()
+    redirect_to = _coerce_str(form.get("redirect_to")) or request.headers.get(
+        "referer", f"/servers/{server_id}"
+    )
+    layout = _coerce_str(form.get("layout")) or "default"
+
+    server: MCPServer | None = None
+    error_message: str | None = None
+
+    try:
+        async with get_async_session() as db_session:
+            stmt = (
+                select(MCPServer)
+                .options(
+                    selectinload(MCPServer.secret_files), selectinload(MCPServer.tools)
+                )
+                .where(MCPServer.id == server_id)
+            )
+            result = await db_session.execute(stmt)
+            server = result.scalar_one_or_none()
+
+            if not server:
+                return templates.TemplateResponse(
+                    request,
+                    "404.html",
+                    get_template_context(
+                        request, message=f"Server '{server_id}' not found"
+                    ),
+                    status_code=404,
+                )
+
+            server.is_active = not server.is_active
+            await db_session.commit()
+
+            mcp_manager = get_mcp_manager(request)
+            container_manager = getattr(request.app.state, "container_manager", None)
+
+            if mcp_manager:
+                if server.is_active and container_manager is not None:
+                    await db_session.refresh(server, ["secret_files"])
+                    try:
+                        discovered_tools = await mcp_manager.add_server(server)
+                        if discovered_tools:
+                            await store_server_tools(db_session, server, discovered_tools)
+                        await db_session.commit()
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        logger.exception(
+                            f"Failed to activate server '{server.name}': {exc}"
+                        )
+                        server.is_active = False
+                        await db_session.commit()
+                        error_message = "Failed to activate server. Check server logs."
+                elif not server.is_active:
+                    try:
+                        mcp_manager.remove_server(server.id)
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        logger.debug(
+                            f"Failed to remove server '{server.id}' from manager: {exc}"
+                        )
+
+    except (RuntimeError, ValueError, ConnectionError, IntegrityError) as e:
+        logger.exception(f"Error toggling server {server_id}: {e}")
+        return templates.TemplateResponse(
+            request,
+            "500.html",
+            get_template_context(request, message="Error toggling server"),
+            status_code=500,
+        )
+
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request,
+            "partials/server_toggle.html",
+            get_template_context(
+                request,
+                server=server,
+                layout=layout,
+                redirect_to=redirect_to,
+                toggle_error=error_message,
+            ),
+        )
+
+    if error_message:
+        redirect_to = _with_query_params(redirect_to, error=error_message)
+
+    return RedirectResponse(url=redirect_to, status_code=302)
 
 
 async def toggle_tool(request: Request) -> HTMLResponse:
@@ -996,6 +1114,7 @@ routes = [
     Route("/servers/add", endpoint=add_server, methods=["GET", "POST"]),
     Route("/servers/{server_id}", endpoint=server_detail, methods=["GET"]),
     Route("/servers/{server_id}/edit", endpoint=edit_server, methods=["GET", "POST"]),
+    Route("/servers/{server_id}/toggle", endpoint=toggle_server, methods=["POST"]),
     Route("/servers/{server_id}/rebuild", endpoint=rebuild_server, methods=["POST"]),
     Route(
         "/servers/{server_id}/tools/{tool_id}/toggle",

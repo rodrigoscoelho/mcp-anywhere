@@ -9,6 +9,7 @@ References:
 
 """
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
@@ -48,7 +49,7 @@ class ToolFilterMiddleware(Middleware):
         if not disabled_tools:
             return tools
 
-        filtered = self._filter_tools(list(tools), disabled_tools)
+        filtered = self._filter_tools(tools, disabled_tools)
         logger.info(
             f"ToolFilterMiddleware: filtered tools to {len(filtered)} enabled items"
         )
@@ -72,26 +73,47 @@ class ToolFilterMiddleware(Middleware):
         logger.debug(f"Disabled tools from DB: {len(disabled)}")
         return disabled
 
-    def _filter_tools(self, tools: list[Any], disabled_tools: set[str]) -> list[Any]:
-        """Filter a list of tools based on disabled names.
+    def _filter_tools(self, tools: Any, disabled_tools: set[str]) -> Any:
+        """Filter a sequence or mapping of tools based on disabled names."""
 
-        Args:
-            tools: List of tool objects or dictionaries
-            disabled_tools: Set of disabled tool names
+        if isinstance(tools, Mapping):
+            filtered: dict[Any, Any] = {}
+            for key, tool in tools.items():
+                fallback_name = key if isinstance(key, str) else ""
+                if not self._is_tool_disabled(tool, disabled_tools, fallback_name):
+                    filtered[key] = tool
+                else:
+                    logger.debug(
+                        f"Filtering disabled tool: {self._get_tool_name(tool) or fallback_name}"
+                    )
+            return filtered
 
-        Returns:
-            list[Any]: Filtered list containing only enabled tools
-        """
-        enabled: list[Any] = []
-        for tool in tools:
-            if not self._is_tool_disabled(tool, disabled_tools):
-                enabled.append(tool)
-            else:
-                logger.debug(f"Filtering disabled tool: {self._get_tool_name(tool)}")
-        return enabled
+        if isinstance(tools, Sequence) and not isinstance(tools, (str, bytes)):
+            enabled: list[Any] = []
+            for tool in tools:
+                if not self._is_tool_disabled(tool, disabled_tools):
+                    enabled.append(tool)
+                else:
+                    logger.debug(
+                        f"Filtering disabled tool: {self._get_tool_name(tool)}"
+                    )
+            return enabled
 
-    def _is_tool_disabled(self, tool: Any, disabled_tools: set[str]) -> bool:
-        name = self._get_tool_name(tool)
+        try:
+            iterable_tools = list(tools)
+        except TypeError:
+            return tools
+
+        return [
+            tool
+            for tool in iterable_tools
+            if not self._is_tool_disabled(tool, disabled_tools)
+        ]
+
+    def _is_tool_disabled(
+        self, tool: Any, disabled_tools: set[str], fallback_name: str | None = None
+    ) -> bool:
+        name = self._get_tool_name(tool) or (fallback_name or "")
         return bool(name and name in disabled_tools)
 
     @staticmethod

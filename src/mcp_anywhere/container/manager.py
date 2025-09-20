@@ -755,6 +755,12 @@ class ContainerManager:
 
             async with get_async_session() as db_session:
                 for server in built_servers:
+                    if not server.is_active:
+                        logger.debug(
+                            f"Skipping mount for inactive server '{server.name}'"
+                        )
+                        continue
+
                     container_name = self._get_container_name(server.id)
                     if container_name in self.reused_containers:
                         logger.debug(
