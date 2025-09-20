@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block title %}Tool Usage Analytics{% endblock %}
+
+{% block content %}
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900">Tool Usage Analytics</h1>
+        <p class="text-sm text-gray-500 mt-2">
+            Monitor recent MCP tool executions, review success metrics, and inspect detailed payloads.
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        <a href="/logs/tools" class="inline-flex items-center px-4 py-2 bg-white border border-gray-200 rounded-lg shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50">
+            <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582M20 20v-5h-.581M5 9a7 7 0 0114 0M5 15a7 7 0 0114 0" />
+            </svg>
+            Refresh Data
+        </a>
+        <span class="text-xs text-gray-500">
+            Last updated:
+            {% if last_updated %}
+                {{ last_updated.strftime('%B %d, %Y %H:%M:%S') }}
+            {% else %}
+                Not available
+            {% endif %}
+        </span>
+    </div>
+</div>
+
+{% if summary %}
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
+    {% for item in summary %}
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+        <div class="flex items-start justify-between mb-3">
+            <div>
+                <p class="text-xs uppercase tracking-wide text-gray-500">{{ item.server_name or 'Unknown Server' }}</p>
+                <h3 class="text-lg font-semibold text-gray-900 mt-1">{{ item.tool_name }}</h3>
+            </div>
+            <span class="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-blue-50 text-blue-700">
+                {{ item.calls }} calls
+            </span>
+        </div>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div>
+                <dt class="text-gray-500">Successes</dt>
+                <dd class="font-medium text-gray-900">{{ item.success }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500">Success Rate</dt>
+                <dd class="font-medium text-gray-900">
+                    {% set percentage = (item.success / item.calls * 100) if item.calls else 0 %}
+                    {{ '%.0f' % percentage }}%
+                </dd>
+            </div>
+            <div class="col-span-2">
+                <dt class="text-gray-500">Last Used</dt>
+                <dd class="font-medium text-gray-900">{{ item.last_used.strftime('%B %d, %Y %H:%M:%S') }}</dd>
+            </div>
+        </dl>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <div class="xl:col-span-2 space-y-6">
+        <section class="bg-white border border-gray-200 rounded-xl shadow-sm">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-900">Tool Usage Timeline</h2>
+                <span class="text-xs text-gray-500">Grouped by day</span>
+            </div>
+            <div class="divide-y divide-gray-100">
+                {% if grouped_logs %}
+                    {% for group in grouped_logs %}
+                    <div class="px-6 py-4">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">{{ group.date_label }}</h3>
+                        <div class="space-y-3">
+                            {% for entry in group.entries %}
+                            <button type="button" onclick="openLogDetail('{{ entry.id }}')"
+                                    class="w-full text-left bg-gray-50 hover:bg-gray-100 transition-colors border border-gray-200 rounded-lg px-4 py-3">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                                                {% if entry.status.lower() == 'success' %}bg-green-100 text-green-700{% else %}bg-red-100 text-red-700{% endif %}">
+                                                {{ entry.status.title() }}
+                                            </span>
+                                            {{ entry.tool_name }}
+                                        </p>
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            {{ entry.time }} • {{ entry.server_name or 'Unknown Server' }} • {{ entry.request_type }}
+                                        </p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-gray-500">Client</p>
+                                        <p class="text-sm font-medium text-gray-900">{{ entry.client_name or '—' }}</p>
+                                    </div>
+                                </div>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                <div class="px-6 py-12 text-center text-gray-500 text-sm">
+                    No tool usage has been recorded yet.
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <section class="bg-white border border-gray-200 rounded-xl shadow-sm">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Request Logs</h2>
+            <span class="text-xs text-gray-500">Showing {{ total_count }} entries</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Timestamp</th>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Client</th>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Server</th>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Request</th>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
+                        <th class="px-4 py-3 text-left font-semibold text-gray-600">Processing</th>
+                        <th class="px-4 py-3 text-right font-semibold text-gray-600">Action</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                    {% for group in grouped_logs %}
+                        {% for entry in group.entries %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 whitespace-nowrap text-gray-900">{{ entry.timestamp_iso }}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-gray-600">{{ entry.client_name or '—' }}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-gray-600">{{ entry.server_name or '—' }}</td>
+                                <td class="px-4 py-3 whitespace-nowrap text-gray-600">{{ entry.request_type }}</td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                                        {% if entry.status.lower() == 'success' %}bg-green-100 text-green-700{% else %}bg-red-100 text-red-700{% endif %}">
+                                        {{ entry.status.title() }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap text-gray-600">
+                                    {% if entry.processing_ms is not none %}
+                                        {{ entry.processing_ms }} ms
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap text-right">
+                                    <button type="button" onclick="openLogDetail('{{ entry.id }}')"
+                                            class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50">
+                                        View
+                                    </button>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    {% endfor %}
+                    {% if total_count == 0 %}
+                    <tr>
+                        <td colspan="7" class="px-4 py-6 text-center text-sm text-gray-500">No recent requests recorded.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<div id="log-detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-60">
+    <div class="w-full max-w-4xl mx-4" id="log-detail-content">
+        <!-- Detail content injected dynamically -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    const modal = document.getElementById('log-detail-modal');
+    const contentContainer = document.getElementById('log-detail-content');
+
+    function closeLogDetail() {
+        modal.classList.add('hidden');
+        contentContainer.innerHTML = '';
+    }
+
+    async function openLogDetail(logId) {
+        if (!modal || !contentContainer) {
+            return;
+        }
+        modal.classList.remove('hidden');
+        contentContainer.innerHTML = '<div class="bg-white rounded-xl shadow-lg p-8 text-center text-gray-500">Loading log details...</div>';
+
+        try {
+            const response = await fetch(`/logs/tools/${logId}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch log detail: ${response.status}`);
+            }
+            const html = await response.text();
+            contentContainer.innerHTML = html;
+        } catch (error) {
+            console.error(error);
+            contentContainer.innerHTML = '<div class="bg-white rounded-xl shadow-lg p-6 text-center text-red-600">Unable to load log details. Please try again later.</div>';
+        }
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
+            closeLogDetail();
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeLogDetail();
+        }
+    });
+
+    document.addEventListener('click', (event) => {
+        const target = event.target.closest('[data-copy-target]');
+        if (!target) {
+            return;
+        }
+        const elementId = target.getAttribute('data-copy-target');
+        const textElement = document.getElementById(elementId);
+        if (!textElement) {
+            return;
+        }
+        copyToClipboard(textElement.innerText);
+        target.innerText = 'Copied!';
+        setTimeout(() => {
+            target.innerText = 'Copy';
+        }, 2000);
+    });
+
+    window.openLogDetail = openLogDetail;
+    window.closeLogDetail = closeLogDetail;
+</script>
+{% endblock %}
