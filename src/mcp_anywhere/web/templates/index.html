@@ -124,7 +124,9 @@
                         </span>
                     </div>
                     <div class="min-w-[120px]">
-                        {% include "partials/server_toggle.html" with server=server, layout='card', redirect_to='/' %}
+                        {% with server=server, layout='card', redirect_to='/' %}
+                            {% include "partials/server_toggle.html" %}
+                        {% endwith %}
                     </div>
                 </div>
                 
