@@ -1,5 +1,6 @@
 """MCP Manager for handling dynamic server mounting and unmounting."""
 
+import re
 from typing import Any
 
 from fastmcp import FastMCP
@@ -31,7 +32,9 @@ def create_mcp_config(server: "MCPServer") -> dict[str, dict[str, Any]]:
         return {"new": {}, "existing": {}}
 
     # Configuration for existing container (docker exec)
-    container_name = container_manager._get_container_name(server.id)
+    container_name = container_manager._get_container_name(
+        server.id, server.name
+    )
     existing_config = {
         "command": "docker",
         "args": [
@@ -102,7 +105,18 @@ class MCPManager:
         """Initialize the MCP manager with a router."""
         self.router = router
         self.mounted_servers: dict[str, FastMCP] = {}
+        self.mounted_server_names: dict[str, str] = {}
         logger.info("Initialized MCPManager")
+
+    @staticmethod
+    def _format_prefix(server_name: str, fallback: str) -> str:
+        """Convert a server name into a safe prefix for mounted tools."""
+
+        sanitized = re.sub(r"\s+", "_", server_name.strip())
+        sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", sanitized)
+        sanitized = sanitized.strip("_.")
+
+        return sanitized or fallback
 
     async def add_server(self, server_config: "MCPServer") -> list[dict[str, Any]]:
         """Add a new MCP server dynamically using FastMCP's mount capability.
@@ -136,12 +150,13 @@ class MCPManager:
         # Create FastMCP proxy for the server
         proxy = FastMCP.as_proxy(proxy_config)
 
-        # Mount with 8-character prefix
-        prefix = server_config.id
+        # Mount with a human-readable prefix derived from the server name
+        prefix = self._format_prefix(server_config.name, server_config.id)
         self.router.mount(proxy, prefix=prefix)
 
         # Track the mounted server
         self.mounted_servers[server_config.id] = proxy
+        self.mounted_server_names[server_config.id] = server_config.name
 
         logger.info(
             f"Successfully mounted server '{server_config.name}' with prefix '{prefix}'"
@@ -179,6 +194,7 @@ class MCPManager:
 
             # Remove from our tracking
             del self.mounted_servers[server_id]
+            self.mounted_server_names.pop(server_id, None)
 
             logger.info(
                 f"Successfully unmounted server '{server_id}' from all managers"
@@ -220,7 +236,9 @@ class MCPManager:
 
             # Check container logs for startup errors
             container_manager = ContainerManager()
-            error_logs = container_manager.get_container_error_logs(server_id)
+            error_logs = container_manager.get_container_error_logs(
+                server_id, server_name=self.mounted_server_names.get(server_id)
+            )
 
             if error_logs:
                 # Try to extract a meaningful error message

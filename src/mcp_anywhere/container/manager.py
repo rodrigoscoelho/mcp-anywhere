@@ -149,8 +149,15 @@ class ContainerManager:
         """Generate the Docker image tag for a server."""
         return f"mcp-anywhere/server-{server.id}"
 
-    def _get_container_name(self, server_id: str) -> str:
+    def _get_container_name(self, server_id: str, server_name: str | None = None) -> str:
         """Generate the container name for a server."""
+
+        if server_name:
+            sanitized_name = re.sub(r"[^a-z0-9_.-]+", "-", server_name.lower())
+            sanitized_name = sanitized_name.strip("-_.")
+            if sanitized_name:
+                return f"mcp-{sanitized_name}"
+
         return f"mcp-{server_id}"
 
     def _is_container_healthy(self, server: MCPServer) -> bool:
@@ -162,7 +169,7 @@ class ContainerManager:
         Returns:
             bool: True if container exists, is running, and has correct image
         """
-        container_name = self._get_container_name(server.id)
+        container_name = self._get_container_name(server.id, server.name)
         expected_image = self.get_image_tag(server)
 
         try:
@@ -241,17 +248,20 @@ class ContainerManager:
                 f"Docker API error while cleaning up container '{container_name}': {e}"
             )
 
-    def get_container_error_logs(self, server_id: str, tail: int = 50) -> str:
+    def get_container_error_logs(
+        self, server_id: str, tail: int = 50, server_name: str | None = None
+    ) -> str:
         """Get recent logs from a container to help diagnose startup issues.
 
         Args:
             server_id: The server ID to get logs for
             tail: Number of recent log lines to retrieve
+            server_name: Optional server name for human-readable container lookup
 
         Returns:
             String containing the container logs, or empty string if not available
         """
-        container_name = self._get_container_name(server_id)
+        container_name = self._get_container_name(server_id, server_name)
         try:
             # Try to get the container - include stopped containers
             container = self.docker_client.containers.get(container_name)
@@ -705,7 +715,9 @@ class ContainerManager:
                         if self._is_container_healthy(server):
                             logger.info(f"Reusing existing container for {server.name}")
                             # Track this container as reused to avoid cleanup during mounting
-                            container_name = self._get_container_name(server.id)
+                            container_name = self._get_container_name(
+                                server.id, server.name
+                            )
                             self.reused_containers.add(container_name)
                             server.build_status = "built"
                             server.build_logs = "Reused existing healthy container"
@@ -761,7 +773,7 @@ class ContainerManager:
                         )
                         continue
 
-                    container_name = self._get_container_name(server.id)
+                    container_name = self._get_container_name(server.id, server.name)
                     if container_name in self.reused_containers:
                         logger.debug(
                             f"Preserving running container {container_name} during mount"
@@ -792,7 +804,9 @@ class ContainerManager:
                             )
                     except (RuntimeError, ValueError, ConnectionError, OSError) as e:
                         # The server failed to start, now we get the logs and store the error
-                        error_logs = self.get_container_error_logs(server.id)
+                        error_logs = self.get_container_error_logs(
+                            server.id, server_name=server.name
+                        )
                         error_msg = self._extract_error_from_logs(error_logs)
 
                         final_error = error_msg or str(e)
@@ -807,7 +821,7 @@ class ContainerManager:
 
                         # Now that we've logged the error, clean up the failed container
                         self._cleanup_existing_container(
-                            self._get_container_name(server.id)
+                            self._get_container_name(server.id, server.name)
                         )
         else:
             logger.info("No built servers to mount.")
@@ -832,7 +846,7 @@ class ContainerManager:
                 logger.info(f"Cleaning up {len(servers)} server containers...")
 
                 for server in servers:
-                    container_name = self._get_container_name(server.id)
+                    container_name = self._get_container_name(server.id, server.name)
                     self._cleanup_existing_container(container_name)
 
                 logger.info("Container cleanup complete.")
