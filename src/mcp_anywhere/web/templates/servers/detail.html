@@ -52,7 +52,9 @@
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <span class="text-gray-600">Server Status:</span>
                     <div class="sm:ml-4">
-                        {% include "partials/server_toggle.html" with server=server, layout='detail', redirect_to='/servers/' ~ server.id %}
+                        {% with layout='detail', redirect_to='/servers/' ~ server.id %}
+                            {% include "partials/server_toggle.html" %}
+                        {% endwith %}
                     </div>
                 </div>
                 <div class="flex justify-between items-center">
