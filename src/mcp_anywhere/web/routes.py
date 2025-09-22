@@ -486,7 +486,9 @@ async def edit_server_post(request: Request) -> Response:
                         logger.warning(f"Failed to remove old server {server.id}: {e}")
 
                     # Clean up any existing container before re-adding
-                    container_name = container_manager._get_container_name(server.id)
+                    container_name = container_manager._get_container_name(
+                        server.id, server.name
+                    )
                     container_manager._cleanup_existing_container(container_name)
                     # Add updated server and discover tools
                     discovered_tools = await mcp_manager.add_server(server)
@@ -921,7 +923,9 @@ async def handle_save_server(request: Request, form_data) -> Response:
                 mcp_manager = get_mcp_manager(request)
                 if mcp_manager:
                     # Clean up any existing container before adding
-                    container_name = container_manager._get_container_name(server.id)
+                    container_name = container_manager._get_container_name(
+                        server.id, server.name
+                    )
                     container_manager._cleanup_existing_container(container_name)
                     discovered_tools = await mcp_manager.add_server(server)
                     await store_server_tools(db_session, server, discovered_tools)
@@ -1068,7 +1072,9 @@ async def rebuild_server(request: Request) -> Response:
                         f"No existing mount to remove for server {server.id}: {exc}"
                     )
 
-                container_name = container_manager._get_container_name(server.id)
+                container_name = container_manager._get_container_name(
+                    server.id, server.name
+                )
                 container_manager._cleanup_existing_container(container_name)
 
                 discovered_tools = await mcp_manager.add_server(server)
