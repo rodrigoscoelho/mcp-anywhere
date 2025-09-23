@@ -11,10 +11,10 @@ import shutil
 import signal
 import sys
 
-from mcp_anywhere.auth.initialization import reset_user_password
+from mcp_anywhere.auth.initialization import initialize_oauth_data, reset_user_password
 from mcp_anywhere.config import Config
 from mcp_anywhere.container.manager import ContainerManager
-from mcp_anywhere.database import close_db
+from mcp_anywhere.database import close_db, init_db
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.transport.http_server import run_http_server
 from mcp_anywhere.transport.stdio_gateway import run_connect_gateway
@@ -235,8 +235,14 @@ async def main() -> None:
             if args.admin_command == "reset-password":
                 password = args.password or prompt_for_password()
                 try:
+                    await init_db()
+                    if args.username == "admin":
+                        await initialize_oauth_data()
                     await reset_user_password(args.username, password)
                 except ValueError as exc:
+                    print(f"Error: {exc}", file=sys.stderr)
+                    sys.exit(1)
+                except RuntimeError as exc:
                     print(f"Error: {exc}", file=sys.stderr)
                     sys.exit(1)
 
