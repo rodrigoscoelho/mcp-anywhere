@@ -13,7 +13,7 @@ class ServerFormData(BaseModel):
     description: str | None = Field(None, max_length=500)
     runtime_type: str = Field(...)
     install_command: str | None = Field(None, max_length=500)
-    start_command: str = Field(..., max_length=500)
+    start_command: str = Field(...)
     env_variables: list[dict] = Field(default_factory=list)
 
     @field_validator("github_url")
