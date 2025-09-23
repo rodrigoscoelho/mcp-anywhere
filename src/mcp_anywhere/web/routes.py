@@ -191,6 +191,16 @@ def build_add_server_context(
     mode: str | None = None,
 ) -> dict[str, Any]:
     """Build the template context for the add server page/partials."""
+    analyze_trigger = None
+    if form_data is not None:
+        if isinstance(form_data, FormData):
+            analyze_trigger = form_data.get("analyze")
+        elif isinstance(form_data, Mapping):
+            analyze_trigger = form_data.get("analyze")
+        else:
+            analyze_trigger = getattr(form_data, "analyze", None)
+    is_analyze_request = analyze_trigger is not None
+
     form_values = {
         "github_url": github_url or "",
         "name": "",
@@ -207,8 +217,11 @@ def build_add_server_context(
 
     for key in form_values.keys():
         value = _get_form_value(form_data, key)
-        if value is not None:
-            form_values[key] = value
+        if value is None:
+            continue
+        if is_analyze_request and key != "github_url" and value == "":
+            continue
+        form_values[key] = value
 
     env_entries = _extract_env_variables_from_form(form_data)
     if not env_entries and analysis and analysis.get("env_variables"):
