@@ -6,10 +6,12 @@ including HTTP server, STDIO server, and client connection modes.
 
 import argparse
 import asyncio
+import getpass
 import shutil
 import signal
 import sys
 
+from mcp_anywhere.auth.initialization import reset_user_password
 from mcp_anywhere.config import Config
 from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.database import close_db
@@ -124,6 +126,29 @@ def create_parser() -> argparse.ArgumentParser:
         "--confirm", action="store_true", help="Skip confirmation prompt"
     )
 
+    # Admin command group
+    admin_parser = subparsers.add_parser(
+        "admin", help="Administrative utilities"
+    )
+    admin_subparsers = admin_parser.add_subparsers(
+        dest="admin_command", required=True, help="Admin operations"
+    )
+
+    reset_password_parser = admin_subparsers.add_parser(
+        "reset-password", help="Reset the password for an existing user"
+    )
+    reset_password_parser.add_argument(
+        "--username",
+        type=str,
+        default="admin",
+        help="Username to reset (default: admin)",
+    )
+    reset_password_parser.add_argument(
+        "--password",
+        type=str,
+        help="New password to set. If omitted, the CLI will prompt interactively.",
+    )
+
     return parser
 
 
@@ -172,6 +197,24 @@ def reset_data(confirm: bool = False) -> None:
         sys.exit(1)
 
 
+def prompt_for_password(min_length: int = 12) -> str:
+    """Prompt the user for a password with confirmation."""
+
+    while True:
+        password = getpass.getpass("New password: ")
+        confirm = getpass.getpass("Confirm new password: ")
+
+        if password != confirm:
+            print("Passwords do not match. Please try again.")
+            continue
+
+        if len(password) < min_length:
+            print(f"Password must be at least {min_length} characters long.")
+            continue
+
+        return password
+
+
 async def main() -> None:
     """Main entry point for MCP Anywhere application.
 
@@ -187,6 +230,18 @@ async def main() -> None:
         if args.command == "reset":
             reset_data(confirm=args.confirm)
             return
+
+        if args.command == "admin":
+            if args.admin_command == "reset-password":
+                password = args.password or prompt_for_password()
+                try:
+                    await reset_user_password(args.username, password)
+                except ValueError as exc:
+                    print(f"Error: {exc}", file=sys.stderr)
+                    sys.exit(1)
+
+                print(f"Password updated for user '{args.username}'.")
+                return
 
         # Setup signal handlers for graceful shutdown (only for server modes)
         if args.command == "serve":
