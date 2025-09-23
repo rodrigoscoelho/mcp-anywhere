@@ -1,5 +1,7 @@
 """OAuth initialization utilities for setting up default users and clients."""
 
+from __future__ import annotations
+
 import secrets
 
 from sqlalchemy import select
@@ -55,6 +57,48 @@ async def create_default_admin_user(
 
     logger.info(f"Created admin user: {username}")
     return admin_user
+
+
+async def reset_user_password(
+    username: str,
+    new_password: str,
+    db_session: AsyncSession | None = None,
+) -> User:
+    """Reset the password for an existing user.
+
+    Args:
+        username: Username of the account to update.
+        new_password: The new password that should be applied.
+        db_session: Optional active database session.
+
+    Returns:
+        Updated :class:`User` instance with the new password applied.
+
+    Raises:
+        ValueError: If the user does not exist or the password does not meet policy
+            requirements.
+    """
+
+    if not new_password or len(new_password) < 12:
+        raise ValueError("New password must be at least 12 characters long.")
+
+    if db_session is None:
+        async with get_async_session() as session:
+            return await reset_user_password(username, new_password, session)
+
+    stmt = select(User).where(User.username == username)
+    user = await db_session.scalar(stmt)
+
+    if user is None:
+        raise ValueError(f"User '{username}' does not exist.")
+
+    user.set_password(new_password)
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    logger.info("Password reset for user '%s'", username)
+    return user
 
 
 async def create_default_oauth_client(
