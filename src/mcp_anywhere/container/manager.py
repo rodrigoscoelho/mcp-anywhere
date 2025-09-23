@@ -322,6 +322,7 @@ class ContainerManager:
             # Configuration errors
             r"(configuration[^\n]+not found[^\n]+)",
             r"(missing required[^\n]+)",
+            r"(caused by:[^\n]+)",
             # General but clear errors
             r"error:\s*([^\n]+)",
             r"exception:\s*([^\n]+)",
@@ -333,6 +334,10 @@ class ContainerManager:
 
         def clean_message(msg: str) -> str:
             """Cleans up a raw log line for display to the user."""
+            msg = msg.strip()
+            # Remove leading log formatting characters / bullets
+            msg = msg.lstrip("×•-* ")
+            msg = re.sub(r"^[╰╭]-?─?▶\s*", "", msg)
             msg = msg.strip(" -|:")
             # Remove timestamps, log levels, and module paths
             msg = re.sub(
@@ -342,16 +347,53 @@ class ContainerManager:
             msg = re.sub(r"^[\w\.]+:\w+:\d+\s*[-|]\s*", "", msg)
             return msg.strip()
 
+        lines = logs.splitlines()
+
         # Search for the first match from our prioritized list
         for pattern in error_patterns:
-            # Find all matches in the entire log blob
-            matches = re.findall(pattern, logs, re.IGNORECASE | re.MULTILINE)
-            if matches:
-                # Use the last match found, as it's likely the most recent/relevant
-                last_match = matches[-1]
-                # Handle tuple results from regex groups
-                message = last_match if isinstance(last_match, str) else last_match[0]
-                return clean_message(message)
+            # Find all matches with their positions so we can include nearby context
+            matches = list(
+                re.finditer(pattern, logs, re.IGNORECASE | re.MULTILINE)
+            )
+            if not matches:
+                continue
+
+            match = matches[-1]
+            groups = match.groups()
+            message = groups[0] if groups else match.group(0)
+
+            if pattern.lower().startswith("failed to") and message:
+                message = f"Failed to {message.strip()}"
+
+            # Determine which line the match occurred on so we can include follow-up context
+            line_index = logs[: match.start()].count("\n")
+            extra_context: list[str] = []
+
+            for next_line in lines[line_index + 1 :]:
+                if not next_line.strip():
+                    break
+
+                stripped = next_line.strip()
+                # Include follow-up lines that usually provide additional context for the
+                # preceding error (e.g. uv's "╰─▶" bullet hints or "Caused by" notes).
+                if re.match(
+                    r"^(╰|caused by:|hint:|help:|note:|see also:)",
+                    stripped,
+                    flags=re.IGNORECASE,
+                ) or next_line.startswith(" "):
+                    extra_context.append(clean_message(stripped))
+                    continue
+
+                break
+
+            cleaned_message = clean_message(message)
+            if extra_context:
+                cleaned_message = " ".join(
+                    [cleaned_message] + [ctx for ctx in extra_context if ctx]
+                ).strip()
+
+            if cleaned_message:
+                return cleaned_message
 
         return None
 

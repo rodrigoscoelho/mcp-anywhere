@@ -27,7 +27,7 @@ class TestContainerStartupErrors:
 Process exited with code 1
         """
         error_msg = container_manager._extract_error_from_logs(logs)
-        assert error_msg == "connect to database: Connection refused"
+        assert error_msg == "Failed to connect to database: Connection refused"
         
         # Test case 3: No clear error message
         logs = """
@@ -56,6 +56,17 @@ Process terminated
         # Should extract the actual error, not the connection closed one
         assert "Google Search Console credentials not found" in error_msg
         assert "GOOGLE_APPLICATION_CREDENTIALS" in error_msg
+
+        # Test case 6: uv multi-line error with follow-up context
+        logs = """
+[ERROR] × Failed to download and build 'zen-mcp-server'
+  ╰─▶ Git operation failed
+  ╰─▶ fatal: repository 'https://github.com/example/zen-mcp-server.git/' not found
+        """
+        error_msg = container_manager._extract_error_from_logs(logs)
+        assert "Failed to download and build 'zen-mcp-server'" in error_msg
+        assert "Git operation failed" in error_msg
+        assert "repository 'https://github.com/example/zen-mcp-server.git/' not found" in error_msg
 
     @pytest.mark.asyncio
     async def test_mount_server_with_startup_error(self):
