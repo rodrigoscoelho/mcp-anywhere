@@ -38,15 +38,20 @@ class ServerFormData(BaseModel):
     @field_validator("install_command")
     @classmethod
     def validate_install_command(cls, v, info: ValidationInfo):
-        """Ensure install command is provided for npx/uvx servers."""
-        if info.data:
-            runtime_type = info.data.get("runtime_type")
-            if runtime_type in ["npx", "uvx"]:
-                if not v or not v.strip():
-                    raise ValueError(
-                        f"Install command is required for {runtime_type} servers. "
-                        f"For npx: 'npm install -g @org/package', for uvx: 'pip install package-name'"
-                    )
+        """Ensure install command requirements match the selected runtime."""
+        runtime_type = info.data.get("runtime_type") if info.data else None
+
+        if v is not None:
+            v = v.strip()
+            if not v:
+                v = None
+
+        if runtime_type == "npx" and not v:
+            raise ValueError(
+                "Install command is required for npx servers. "
+                "For npx: 'npm install -g @org/package'"
+            )
+
         return v
 
 
