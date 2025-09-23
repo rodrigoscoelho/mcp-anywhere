@@ -34,6 +34,35 @@ from mcp_anywhere.server_guidance import (
 
 logger = get_logger(__name__)
 
+_LABEL_PATTERNS = {
+    "runtime_type": re.compile(r"^RUNTIME\s*:\s*(.+)$", re.IGNORECASE),
+    "install_command": re.compile(r"^INSTALL\s*:\s*(.+)$", re.IGNORECASE),
+    "start_command": re.compile(r"^START\s*:\s*(.+)$", re.IGNORECASE),
+    "name": re.compile(r"^NAME\s*:\s*(.+)$", re.IGNORECASE),
+    "description": re.compile(r"^DESCRIPTION\s*:\s*(.+)$", re.IGNORECASE),
+}
+
+_ENV_VAR_PATTERN = re.compile(
+    r"^KEY\s*:\s*(?P<key>[^,]+)"
+    r"(?:,\s*DESC\s*:\s*(?P<desc>[^,]+))?"
+    r"(?:,\s*REQUIRED\s*:\s*(?P<required>[^,]+))?",
+    re.IGNORECASE,
+)
+
+_OPTIONAL_INSTALL_STRINGS = {
+    "",
+    "none",
+    "none required",
+    "not required",
+    "not needed",
+    "no install",
+    "no installation",
+    "no dependencies",
+    "n/a",
+}
+
+_VALID_RUNTIME_VALUES = ("docker", "uvx", "npx")
+
 
 class AsyncClaudeAnalyzer:
     """Async version of ClaudeAnalyzer for use in async contexts."""
@@ -254,9 +283,10 @@ class AsyncClaudeAnalyzer:
         6. **Environment Variables**: {env_guidance}
            {env_warning}
 
-        Respond in this exact, parsable format. Do not add any conversational text or pleasantries.
+        Respond in this exact, parsable format using the uppercase field labels exactly as shown.
+        Do not add any conversational text, Markdown fences, or extra commentary.
 
-        RUNTIME: [npx|uvx]
+        RUNTIME: [docker|npx|uvx]
         INSTALL: [full install command]
         START: [full start command]
         NAME: [server name]
@@ -268,6 +298,22 @@ class AsyncClaudeAnalyzer:
 
     def _parse_claude_response(self, text: str) -> dict[str, Any]:
         """Parse Claude's structured response into a dictionary."""
+
+        def _normalize_runtime(value: str) -> str:
+            lowered = value.lower()
+            for runtime in _VALID_RUNTIME_VALUES:
+                if runtime in lowered:
+                    return runtime
+            parts = re.split(r"[\s,()/|-]+", lowered)
+            return parts[0] if parts and parts[0] else "docker"
+
+        def _normalize_optional_command(value: str) -> str:
+            cleaned = value.strip().strip("`\"")
+            normalized = cleaned.lower().rstrip(".")
+            if normalized in _OPTIONAL_INSTALL_STRINGS:
+                return ""
+            return cleaned
+
         result = {
             "runtime_type": "docker",
             "install_command": "",
@@ -277,55 +323,56 @@ class AsyncClaudeAnalyzer:
             "env_variables": [],
         }
 
-        for line in text.splitlines():
-            if line.startswith("RUNTIME:"):
-                result["runtime_type"] = line.split(":", 1)[1].strip()
-            elif line.startswith("INSTALL:"):
-                cmd = line.split(":", 1)[1].strip()
-                # Keep the full command, including "none" if specified
-                result["install_command"] = cmd if cmd.lower() != "none" else ""
-            elif line.startswith("START:"):
-                result["start_command"] = line.split(":", 1)[1].strip()
-            elif line.startswith("NAME:"):
-                result["name"] = line.split(":", 1)[1].strip()
-            elif line.startswith("DESCRIPTION:"):
-                result["description"] = line.split(":", 1)[1].strip()
-            elif line.startswith("- KEY:"):
-                try:
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) < 1:
-                        continue
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
 
-                    # Extract key (required)
-                    key_part = parts[0].split(":", 1)
-                    if len(key_part) < 2:
-                        logger.warning(
-                            f"Could not parse env var line (missing key): {line}"
-                        )
-                        continue
-                    key = key_part[1].strip()
+            if re.match(r"^ENV_VARS\s*:?", line, re.IGNORECASE):
+                continue
 
-                    # Extract description (optional, but line must have proper format)
-                    desc = ""
-                    if len(parts) > 1 and "DESC:" in parts[1]:
-                        desc = parts[1].split(":", 1)[1].strip()
-                    elif len(parts) > 1:
-                        # Line has comma but no DESC: - this is malformed
-                        logger.warning(
-                            f"Could not parse env var line (malformed DESC): {line}"
-                        )
-                        continue
+            matched_label = False
+            for key, pattern in _LABEL_PATTERNS.items():
+                match = pattern.match(line)
+                if not match:
+                    continue
 
-                    # Extract required flag (optional, defaults to true)
-                    required = True
-                    if len(parts) > 2 and "REQUIRED:" in parts[2]:
-                        req_str = parts[2].split(":", 1)[1].strip()
-                        required = req_str.lower() == "true"
+                value = match.group(1).strip()
+                if key == "runtime_type":
+                    result[key] = _normalize_runtime(value)
+                elif key == "install_command":
+                    result[key] = _normalize_optional_command(value)
+                else:
+                    result[key] = value
+                matched_label = True
+                break
 
-                    result["env_variables"].append(
-                        {"key": key, "description": desc, "required": required}
-                    )
-                except (IndexError, ValueError) as e:
-                    logger.warning(f"Could not parse env var line: {line} - {e}")
+            if matched_label:
+                continue
+
+            env_line = line
+            if env_line.startswith(("-", "*", "•")):
+                env_line = env_line.lstrip("-*• ").strip()
+
+            match = _ENV_VAR_PATTERN.match(env_line)
+            if not match:
+                continue
+
+            key_value = match.group("key").strip()
+            if not key_value:
+                logger.warning("Could not parse env var line (empty key): %s", raw_line)
+                continue
+
+            desc_value = match.group("desc") or ""
+            required_raw = (match.group("required") or "true").strip().lower()
+            required = required_raw in {"true", "yes", "required", "1"}
+
+            result["env_variables"].append(
+                {
+                    "key": key_value,
+                    "description": desc_value.strip(),
+                    "required": required,
+                }
+            )
 
         return result

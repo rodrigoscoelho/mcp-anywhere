@@ -12,8 +12,10 @@ CONTAINER_EXECUTION_NOTE = (
 
 RUNTIME_GUIDANCE = dedent(
     """
-    Determine if this is 'npx' (for Node.js) or 'uvx' (for Python). Prioritize `pyproject.toml`
-    for Python projects and `package.json` for Node.js projects.
+    Determine the correct runtime:
+    - Use 'uvx' for Python projects (look for `pyproject.toml`).
+    - Use 'npx' for Node.js projects (look for `package.json`).
+    - Use 'docker' only when the repository must be built/run via Docker.
     """
 ).strip()
 

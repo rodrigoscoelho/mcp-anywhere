@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+#
+# apply_and_push_menu.sh — Versão interativa (menu) do apply_and_push.sh - 
+# Menu com escolhas para backup, commit, tests, push, tag, PR, dry-run, etc. - Por 
+# padrão usa --force-with-lease; permite --force se você escolher - Cria backup 
+# local da branch remota antes de sobrescrever
+#
+# Salve como apply_and_push.sh, chmod +x apply_and_push.sh e execute.
+#
+set -o pipefail set -u
+# ------------ Configurações iniciais ------------
+REMOTE="origin" FORCE_MODE="lease" # "lease" (default) ou "force" DRY_RUN=false 
+BACKUP=true BACKUP_BRANCH="" COMMIT_MSG="" BRANCH="" REPO_ROOT="" 
+LOG_DIR=".apply_and_push_logs" LOG_FILE="" RUN_TESTS_CMD="pytest" 
+STASH_BEFORE=false
+# ------------ Helpers ------------
+info() { printf "\e[36m[INFO]\e[0m %s\n" "$*"; } warn() { printf 
+"\e[33m[WARN]\e[0m %s\n" "$*"; } ok() { printf "\e[32m[OK]\e[0m %s\n" "$*"; } 
+die() { printf "\e[31m[ERROR]\e[0m %s\n" "$*"; exit 1; } log_init() {
+  mkdir -p "$LOG_DIR" LOG_FILE="${LOG_DIR}/apply_and_push_$(date -u 
+  +%Y%m%dT%H%M%SZ).log" echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) START" >"$LOG_FILE"
+}
+log() { if [ -n "${LOG_FILE:-}" ]; then printf '%s %s\n' "$(date -u 
+    +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG_FILE"
+  fi
+}
+confirm() {
+  # Confirm prompt; returns 0 if yes
+  local prompt="${1:-Continue?}" local default="${2:-n}" # default n while true; 
+  do
+    read -rp "$prompt [y/N]: " yn case "$yn" in [Yy]* ) return 0 ;; [Nn]*|"" ) 
+      return 1 ;; * ) echo "Por favor responda 'y' ou 'n'." ;;
+    esac done
+}
+# ------------ Repo detection ------------
+ensure_repo() { REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)" 
+  if [ -z "$REPO_ROOT" ]; then
+    die "Você precisa rodar este script dentro de um repositório git." fi cd 
+  "$REPO_ROOT" || die "Não foi possível entrar em $REPO_ROOT" BRANCH="$(git 
+  symbolic-ref --quiet --short HEAD 2>/dev/null || true)" if [ -z "$BRANCH" ]; 
+  then
+    die "HEAD está em detached ou não está numa branch nomeada. Saia do 
+    'detached' antes."
+  fi
+}
+# ------------ Funções principais ------------
+show_status() { git status --short || true echo git --no-pager log --oneline 
+  --graph --decorate -n 10 || true echo git --no-pager diff --stat || true
+}
+fetch_remote() { info "Buscando remote ${REMOTE}..." git fetch "$REMOTE" || warn 
+  "git fetch retornou erro (continuando)"
+}
+create_backup() { if ! git show-ref --verify --quiet 
+  "refs/remotes/${REMOTE}/${BRANCH}"; then
+    warn "Branch remota ${REMOTE}/${BRANCH} não existe — nada a backupear." 
+    return 0
+  fi BACKUP_BRANCH="backup/${BRANCH}-$(date -u +%Y%m%dT%H%M%SZ)" git branch -f 
+  "$BACKUP_BRANCH" "${REMOTE}/${BRANCH}" \
+    && ok "Backup local criado: ${BACKUP_BRANCH} -> ${REMOTE}/${BRANCH}" \
+    || warn "Falha ao criar backup local"
+  log "Created backup branch ${BACKUP_BRANCH}"
+}
+stash_changes() { if git diff --quiet && git diff --staged --quiet; then info "Sem 
+    mudanças locais para stash." return 0
+  fi git stash push --include-untracked -m "pre-apply_and_push $(date -u 
+  +%Y%m%dT%H%M%SZ)" \
+    && ok "Stashed alterações" || warn "Falha ao stash"
+}
+stage_all() { git add -A ok "git add -A executado"
+}
+commit_changes() { if git diff --staged --quiet; then info "Nenhuma mudança 
+    staged para commitar." return 0
+  fi if [ -z "${COMMIT_MSG}" ]; then echo "Digite a mensagem do commit (ou ENTER 
+    para usar mensagem automática):" read -r input_msg if [ -n "$input_msg" ]; 
+    then
+      COMMIT_MSG="$input_msg" fi fi if [ -z "$COMMIT_MSG" ]; then 
+    COMMIT_MSG="Apply patch and push (automated) - $(whoami) $(date -u 
+    +%Y-%m-%dT%H:%M:%SZ)"
+  fi git commit -m "$COMMIT_MSG" \ && ok "Commit criado: $COMMIT_MSG" \
+    || warn "git commit falhou"
+  log "Commit: $COMMIT_MSG"
+}
+run_tests() { if ! command -v pytest >/dev/null 2>&1; then warn "pytest não 
+    encontrado no PATH; pulando testes." return 0
+  fi info "Executando testes ($RUN_TESTS_CMD)..." if $DRY_RUN; then info 
+    "(dry-run) pula execução de testes" return 0
+  fi if ! $RUN_TESTS_CMD; then warn "Testes falharam." return 1 fi ok "Testes OK." 
+  return 0
+}
+create_tag() { echo "Informe o nome da tag (ex: v1.2.3):" read -r tagname if [ -z 
+  "$tagname" ]; then
+    warn "Nome de tag vazio — abortando criação de tag." return 1 fi echo 
+  "Mensagem de tag (opcional):" read -r tagmsg if $DRY_RUN; then
+    info "(dry-run) Tag $tagname criada localmente (simulação)." return 0 fi if 
+  [ -z "$tagmsg" ]; then
+    git tag -a "$tagname" -m "Tag $tagname" && ok "Tag criada: $tagname" || warn 
+    "Falha ao criar tag"
+  else git tag -a "$tagname" -m "$tagmsg" && ok "Tag criada: $tagname" || warn 
+    "Falha ao criar tag"
+  fi git push "$REMOTE" "refs/tags/$tagname" && ok "Tag enviada para remoto: 
+  $tagname" || warn "Falha ao enviar tag"
+}
+perform_push() {
+  # push with chosen force mode
+  local push_args if [ "$FORCE_MODE" = "lease" ]; then 
+    push_args=(--force-with-lease)
+  else push_args=(--force) fi echo "Preparando para empurrar para 
+  ${REMOTE}/${BRANCH} com modo: $FORCE_MODE" if $DRY_RUN; then
+    info "(dry-run) comando: git push -u $REMOTE $BRANCH ${push_args[*]}" return 0 
+  fi
+  # Compose and run push
+  git push -u "$REMOTE" "$BRANCH" "${push_args[@]}" \ && ok "Push realizado: 
+    ${REMOTE}/${BRANCH}" \
+    || { warn "Push falhou."; return 1; }
+}
+create_pr() { if ! command -v gh >/dev/null 2>&1; then warn "gh CLI não 
+    encontrado; instale e reexecute para criar PR automaticamente." return 1
+  fi echo "Base do PR (ex: main):" read -r base base="${base:-main}" echo "Título 
+  do PR (opcional):" read -r title title="${title:-$(git log -1 --pretty=%B | head 
+  -n1)}" echo "Corpo do PR (opcional):" read -r body if $DRY_RUN; then
+    info "(dry-run) gh pr create --base $base --head $BRANCH --title \"$title\" 
+    --body \"$body\"" return 0
+  fi gh pr create --base "$base" --head "$BRANCH" --title "$title" --body "$body" 
+  \
+    && ok "PR criado/aberto via gh" || warn "Falha ao criar PR via gh"
+}
+show_summary() { echo "=== RESUMO ===" echo "Repo: $REPO_ROOT" echo "Branch: 
+  $BRANCH" echo "Remote: $REMOTE" echo "Force mode: $FORCE_MODE" echo "Dry-run: 
+  $DRY_RUN" echo "Backup: $BACKUP (${BACKUP_BRANCH:-<nenhum>})" echo "Commit msg: 
+  ${COMMIT_MSG:-<não definida>}" echo "Log file: ${LOG_FILE:-<não habilitado>}" 
+  echo "=============="
+}
+# ------------ Menu ------------
+main_menu() { ensure_repo log_init if $DRY_RUN; then info "Modo DRY-RUN ativo"; fi
+  # fetch remote early
+  fetch_remote
+  # populate initial backup branch if desired
+  if $BACKUP; then if git show-ref --verify --quiet 
+    "refs/remotes/${REMOTE}/${BRANCH}"; then
+      BACKUP_BRANCH="backup/${BRANCH}-$(date -u +%Y%m%dT%H%M%SZ)" else 
+      BACKUP=false
+    fi fi while true; do echo echo "================== APPLY & PUSH (MENU) 
+    ==================" echo "1) Mostrar status e diffs" echo "2) Criar backup 
+    local da branch remota (backup/*)" echo "3) Stash alterações (opcional)" 
+    echo "4) git add -A (stage tudo)" echo "5) Commitar mudanças (definir/alterar 
+    mensagem)" echo "6) Rodar testes (pytest)" echo "7) Configurar push (forçar? 
+    atual=$FORCE_MODE)" echo "8) Fazer push para remoto (sobrescrever se 
+    necessário)" echo "9) Criar e push de tag" echo "10) Criar PR via gh CLI" 
+    echo "11) Alternar dry-run (atual: $DRY_RUN)" echo "12) Mostrar resumo" echo 
+    "13) Executar fluxo completo (backup -> add -> commit -> tests -> push)" echo 
+    "14) Sair" echo "=========================================================" 
+    read -rp "Escolha uma opção (1-14): " choice case "$choice" in
+      1) show_status ;; 2) if [ "$BACKUP" = true ] && [ -n "${BACKUP_BRANCH:-}" ]; 
+         then
+           echo "Backup proposto: $BACKUP_BRANCH -> ${REMOTE}/${BRANCH}" fi if 
+         confirm "Criar backup agora?"; then create_backup; fi
+         ;;
+      3) if confirm "Deseja guardar (stash) alterações não comitadas?"; then 
+         stash_changes; fi
+         ;;
+      4) if confirm "Executar git add -A ?"; then stage_all; fi
+         ;;
+      5) echo "Mensagem de commit atual: ${COMMIT_MSG:-<vazia>}" echo "Digite nova 
+         mensagem (ou ENTER para manter):" read -r tmpmsg if [ -n "$tmpmsg" ]; 
+         then COMMIT_MSG="$tmpmsg"; fi if confirm "Criar commit com a mensagem: 
+         '$COMMIT_MSG'?"; then commit_changes; fi
+         ;;
+      6) if run_tests; then ok "Testes OK"; else warn "Testes retornaram falha"; 
+         fi
+         ;;
+      7) echo "Modo atual: $FORCE_MODE" echo "1) Usar --force-with-lease 
+         (recomendado)" echo "2) Usar --force (perigoso)" read -rp "Escolha 1 ou 
+         2: " fm case "$fm" in
+           1) FORCE_MODE="lease"; ok "Modo setado para --force-with-lease" ;; 2) 
+           FORCE_MODE="force"; warn "Modo setado para --force (cuidado!)" ;; *) 
+           warn "Opção inválida" ;;
+         esac
+         ;;
+      8) if [ "$BACKUP" = true ] && [ -n "${BACKUP_BRANCH:-}" ]; then echo "Backup 
+           local disponível: $BACKUP_BRANCH -> ${REMOTE}/${BRANCH}"
+         fi if confirm "Executar push para ${REMOTE}/${BRANCH} agora?"; then if [ 
+           "$BACKUP" = true ] && [ -n "${BACKUP_BRANCH:-}" ]; then
+             # ensure backup exists
+             if ! git show-ref --verify --quiet "refs/heads/${BACKUP_BRANCH}"; 
+             then
+               create_backup fi fi perform_push || warn "push falhou" fi
+         ;;
+      9) create_tag
+         ;;
+      10) create_pr
+         ;;
+      11) DRY_RUN=!$DRY_RUN
+         # bash doesn't handle toggling like that; do explicit:
+         if [ "$DRY_RUN" = true ]; then DRY_RUN=false; else DRY_RUN=true; fi echo 
+         "Dry-run agora: $DRY_RUN"
+         ;;
+      12) show_summary ;; 13) echo "Fluxo completo selecionado." if [ "$BACKUP" = 
+         true ] && [ -n "${BACKUP_BRANCH:-}" ]; then
+           echo "Backup: ${BACKUP_BRANCH}" fi if confirm "Continuar com o fluxo 
+         completo (backup -> add -> commit -> tests -> push)?"; then
+           if [ "$BACKUP" = true ] && [ -n "${BACKUP_BRANCH:-}" ]; then 
+             create_backup
+           fi stage_all commit_changes if ! run_tests; then warn "Testes falharam. 
+             Abortando before push." continue
+           fi perform_push || warn "Push falhou no fluxo completo" fi
+         ;;
+      14) echo "Saindo..."; break ;; *) echo "Opção inválida" ;; esac done echo 
+  "Sessão finalizada." log "Session finished"
+}
+# Entry point
+main_menu

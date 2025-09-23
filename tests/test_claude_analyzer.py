@@ -210,6 +210,34 @@ ENV_VARS:
 
 
 @pytest.mark.asyncio
+async def test_parse_claude_response_handles_variations():
+    """Ensure parsing tolerates lowercase labels and optional install markers."""
+
+    response_text = """runtime: Docker image build
+install: `none required.`
+start: docker run my-image
+name: Example Docker Server
+description: Runs the MCP server from a Docker image
+env_vars:
+• key: API_KEY, desc: API token, required: YES
+- key: DEBUG_MODE, desc: Enable verbose logging, required: no"""
+
+    analyzer = AsyncClaudeAnalyzer.__new__(AsyncClaudeAnalyzer)
+    result = analyzer._parse_claude_response(response_text)
+
+    assert result["runtime_type"] == "docker"
+    assert result["install_command"] == ""
+    assert result["start_command"] == "docker run my-image"
+    assert result["name"] == "Example Docker Server"
+    assert result["description"] == "Runs the MCP server from a Docker image"
+    assert len(result["env_variables"]) == 2
+    assert result["env_variables"][0]["key"] == "API_KEY"
+    assert result["env_variables"][0]["required"] is True
+    assert result["env_variables"][1]["key"] == "DEBUG_MODE"
+    assert result["env_variables"][1]["required"] is False
+
+
+@pytest.mark.asyncio
 async def test_call_claude_api_success(analyzer):
     """Test successful Claude API call."""
 
