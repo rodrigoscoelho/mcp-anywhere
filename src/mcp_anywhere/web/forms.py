@@ -30,7 +30,7 @@ class ServerFormData(BaseModel):
     @classmethod
     def validate_runtime_type(cls, v):
         """Validate runtime type is one of allowed values."""
-        allowed_types = ["npx", "uvx", "docker"]
+        allowed_types = ["uvx", "npx"]
         if v not in allowed_types:
             raise ValueError(f"Runtime type must be one of: {', '.join(allowed_types)}")
         return v

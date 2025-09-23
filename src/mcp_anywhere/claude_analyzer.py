@@ -61,7 +61,8 @@ _OPTIONAL_INSTALL_STRINGS = {
     "n/a",
 }
 
-_VALID_RUNTIME_VALUES = ("docker", "uvx", "npx")
+_VALID_RUNTIME_VALUES = ("uvx", "npx")
+_DEFAULT_RUNTIME = "uvx"
 
 
 class AsyncClaudeAnalyzer:
@@ -286,7 +287,7 @@ class AsyncClaudeAnalyzer:
         Respond in this exact, parsable format using the uppercase field labels exactly as shown.
         Do not add any conversational text, Markdown fences, or extra commentary.
 
-        RUNTIME: [docker|npx|uvx]
+        RUNTIME: [uvx|npx]
         INSTALL: [full install command]
         START: [full start command]
         NAME: [server name]
@@ -305,7 +306,10 @@ class AsyncClaudeAnalyzer:
                 if runtime in lowered:
                     return runtime
             parts = re.split(r"[\s,()/|-]+", lowered)
-            return parts[0] if parts and parts[0] else "docker"
+            for part in parts:
+                if part in _VALID_RUNTIME_VALUES:
+                    return part
+            return _DEFAULT_RUNTIME
 
         def _normalize_optional_command(value: str) -> str:
             cleaned = value.strip().strip("`\"")
@@ -315,7 +319,7 @@ class AsyncClaudeAnalyzer:
             return cleaned
 
         result = {
-            "runtime_type": "docker",
+            "runtime_type": _DEFAULT_RUNTIME,
             "install_command": "",
             "start_command": "",
             "name": "unnamed-server",

@@ -72,9 +72,6 @@
                         <option value="uvx" {% if server.runtime_type == 'uvx' %}selected{% endif %}>
                             Python (uvx)
                         </option>
-                        <option value="docker" {% if server.runtime_type == 'docker' %}selected{% endif %}>
-                            Docker
-                        </option>
                     </select>
                     {% if errors and errors.runtime_type %}
                         <p class="text-red-600 text-sm mt-1">{{ errors.runtime_type[0] }}</p>

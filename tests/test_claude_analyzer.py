@@ -225,7 +225,7 @@ env_vars:
     analyzer = AsyncClaudeAnalyzer.__new__(AsyncClaudeAnalyzer)
     result = analyzer._parse_claude_response(response_text)
 
-    assert result["runtime_type"] == "docker"
+    assert result["runtime_type"] == "uvx"
     assert result["install_command"] == ""
     assert result["start_command"] == "docker run my-image"
     assert result["name"] == "Example Docker Server"

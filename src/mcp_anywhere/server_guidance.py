@@ -15,7 +15,6 @@ RUNTIME_GUIDANCE = dedent(
     Determine the correct runtime:
     - Use 'uvx' for Python projects (look for `pyproject.toml`).
     - Use 'npx' for Node.js projects (look for `package.json`).
-    - Use 'docker' only when the repository must be built/run via Docker.
     """
 ).strip()
 

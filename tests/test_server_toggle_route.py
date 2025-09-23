@@ -40,9 +40,9 @@ async def test_toggle_server_route_updates_activation_state(app, client):
             name=f"Toggle Server {uuid.uuid4().hex[:6]}",
             github_url="https://github.com/example/toggle-server",
             description="Toggle test server",
-            runtime_type="docker",
-            install_command="",
-            start_command="npm run start",
+            runtime_type="uvx",
+            install_command="uv tool install toggle-server",
+            start_command="uvx toggle-server",
             is_active=True,
         )
         session.add(server)

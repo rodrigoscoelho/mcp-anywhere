@@ -141,6 +141,6 @@ def test_build_add_server_context_manual_mode_defaults():
     context = build_add_server_context(request, mode="manual")
 
     assert context["config_mode"] == "manual"
-    assert context["form_values"]["runtime_type"] == "docker"
+    assert context["form_values"]["runtime_type"] == "uvx"
     assert "runtime_type" in context["field_guidance"]
     assert context["env_entries"] == []

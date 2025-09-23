@@ -83,7 +83,6 @@
                     name="runtime_type"
                     class="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     required>
-                <option value="docker" {% if form_values.runtime_type == 'docker' %}selected{% endif %}>Docker</option>
                 <option value="uvx" {% if form_values.runtime_type == 'uvx' %}selected{% endif %}>uvx (Python)</option>
                 <option value="npx" {% if form_values.runtime_type == 'npx' %}selected{% endif %}>npx (Node.js)</option>
             </select>

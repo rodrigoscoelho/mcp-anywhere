@@ -205,7 +205,7 @@ def build_add_server_context(
         "github_url": github_url or "",
         "name": "",
         "description": "",
-        "runtime_type": "docker",
+        "runtime_type": "uvx",
         "install_command": "",
         "start_command": "",
     }
@@ -745,7 +745,7 @@ async def handle_claude_connection_error(
     analysis = {
         "name": "analyzed-server",
         "description": "Claude analysis unavailable - please fill manually",
-        "runtime_type": "docker",
+        "runtime_type": "uvx",
         "install_command": "",
         "start_command": "echo 'placeholder'",
     }
