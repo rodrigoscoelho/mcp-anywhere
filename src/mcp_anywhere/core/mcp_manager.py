@@ -24,6 +24,26 @@ def create_mcp_config(server: "MCPServer") -> dict[str, dict[str, Any]]:
     """
     container_manager = ContainerManager()
 
+    if server.runtime_type == "docker":
+        start_command = (server.start_command or "").strip()
+        if not start_command:
+            logger.warning(f"No start command for server {server.name}")
+            return {"new": {}, "existing": {}}
+
+        env_vars = container_manager._get_env_vars(server)
+        if "MCP_TRANSPORT" not in env_vars:
+            env_vars["MCP_TRANSPORT"] = "stdio"
+
+        docker_config = {
+            "command": "sh",
+            "args": ["-lc", start_command],
+            "env": env_vars,
+            "transport": env_vars.get("MCP_TRANSPORT", "stdio"),
+            "init_timeout": 30,
+        }
+
+        return {"new": docker_config, "existing": {}}
+
     # Use container manager's parsing logic for commands
     run_command = container_manager._parse_start_command(server)
 

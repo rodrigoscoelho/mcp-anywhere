@@ -100,3 +100,37 @@ def test_create_mcp_config_sets_default_stdio_env() -> None:
     assert "-e" in run_args
     env_index = run_args.index("-e")
     assert run_args[env_index + 1] == "MCP_TRANSPORT=stdio"
+
+
+def test_create_mcp_config_handles_docker_runtime() -> None:
+    server = cast(
+        MCPServer,
+        SimpleNamespace(
+            id="dock123",
+            name="docker-demo",
+            github_url="https://example.com/docker",
+            runtime_type="docker",
+            start_command="docker run my-image --stdio",
+            install_command="docker pull my-image",
+            env_variables=[{"key": "API_KEY", "value": "secret"}],
+            secret_files=[],
+        ),
+    )
+
+    with (
+        patch.object(ContainerManager, "__init__", return_value=None),
+        patch.object(
+            ContainerManager,
+            "_get_env_vars",
+            return_value={"API_KEY": "secret"},
+        ),
+    ):
+        config = create_mcp_config(server)
+
+    docker_config = config["new"]
+
+    assert docker_config["command"] == "sh"
+    assert docker_config["args"] == ["-lc", "docker run my-image --stdio"]
+    assert docker_config["env"]["API_KEY"] == "secret"
+    assert docker_config["env"]["MCP_TRANSPORT"] == "stdio"
+    assert config["existing"] == {}

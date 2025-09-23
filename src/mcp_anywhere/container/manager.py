@@ -1,14 +1,16 @@
 """Manages container lifecycle for MCP servers in any language.
 
 Supports:
-- npx: Node.js/JavaScript servers
-- uvx: Python servers
+- npx: Node.js/JavaScript servers (managed containers)
+- uvx: Python servers (managed containers)
+- docker: External Docker commands managed by user-provided scripts
 """
 
 import json
 import os
 import re
 import shlex
+import subprocess
 from typing import Any, Optional, Protocol, cast
 
 import docker
@@ -169,6 +171,13 @@ class ContainerManager:
         Returns:
             bool: True if container exists, is running, and has correct image
         """
+        if not self._manages_container(server):
+            logger.debug(
+                "Runtime %s does not use managed containers; skipping health check",
+                server.runtime_type,
+            )
+            return False
+
         container_name = self._get_container_name(server.id, server.name)
         expected_image = self.get_image_tag(server)
 
@@ -493,6 +502,11 @@ class ContainerManager:
             # Fall back to simple split
             return cmd.split()
 
+    def _manages_container(self, server: MCPServer) -> bool:
+        """Return True if this runtime type uses managed containers."""
+
+        return server.runtime_type in {"npx", "uvx"}
+
     def build_server_image(self, server: MCPServer) -> str:
         """Build a Docker image for an MCP server with dependencies pre-installed."""
         image_tag = self.get_image_tag(server)
@@ -509,6 +523,44 @@ class ContainerManager:
             elif server.runtime_type == "uvx":
                 lang = "python"
                 base_image = self.python_image
+            elif server.runtime_type == "docker":
+                install_command = (server.install_command or "").strip()
+                if install_command:
+                    logger.info(
+                        "Executing docker install command for %s: %s",
+                        server.name,
+                        install_command,
+                    )
+                    try:
+                        result = subprocess.run(
+                            install_command,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=Config.DOCKER_TIMEOUT,
+                        )
+                    except subprocess.TimeoutExpired as exc:  # pragma: no cover - timeout safety
+                        raise RuntimeError(
+                            f"Install command timed out after {exc.timeout} seconds"
+                        ) from exc
+
+                    if result.returncode != 0:
+                        stderr_output = result.stderr.strip()
+                        stdout_output = result.stdout.strip()
+                        error_output = stderr_output or stdout_output or "unknown error"
+                        raise RuntimeError(
+                            f"Failed to execute install command: {error_output}"
+                        )
+
+                    logger.info("Docker install command completed successfully")
+                else:
+                    logger.info(
+                        "No install command provided for docker runtime; skipping install"
+                    )
+
+                # Docker runtime relies on user-provided start command, so we don't
+                # build a managed image. Return existing tag (if any) for bookkeeping.
+                return server.image_tag or ""
             else:
                 raise ValueError(f"Unsupported runtime type: {server.runtime_type}")
 
@@ -743,7 +795,14 @@ class ContainerManager:
                         image_tag = self.build_server_image(server)
                         server.build_status = "built"
                         server.image_tag = image_tag
-                        server.build_logs = f"Successfully built image {image_tag}"
+                        if server.runtime_type == "docker":
+                            server.build_logs = (
+                                "Docker runtime ready (no managed image build required)"
+                            )
+                        else:
+                            server.build_logs = (
+                                f"Successfully built image {image_tag}"
+                            )
                         await session.commit()
                         logger.info(f"Successfully built image for {server.name}.")
                         logger.debug(
@@ -773,13 +832,19 @@ class ContainerManager:
                         )
                         continue
 
-                    container_name = self._get_container_name(server.id, server.name)
-                    if container_name in self.reused_containers:
-                        logger.debug(
-                            f"Preserving running container {container_name} during mount"
-                        )
+                    if self._manages_container(server):
+                        container_name = self._get_container_name(server.id, server.name)
+                        if container_name in self.reused_containers:
+                            logger.debug(
+                                f"Preserving running container {container_name} during mount"
+                            )
+                        else:
+                            self._cleanup_existing_container(container_name)
                     else:
-                        self._cleanup_existing_container(container_name)
+                        logger.debug(
+                            "Runtime %s handles its own container lifecycle; skipping cleanup",
+                            server.runtime_type,
+                        )
 
                     try:
                         # Add server to MCP manager and discover tools
@@ -820,9 +885,10 @@ class ContainerManager:
                         await db_session.commit()
 
                         # Now that we've logged the error, clean up the failed container
-                        self._cleanup_existing_container(
-                            self._get_container_name(server.id, server.name)
-                        )
+                        if self._manages_container(server):
+                            self._cleanup_existing_container(
+                                self._get_container_name(server.id, server.name)
+                            )
         else:
             logger.info("No built servers to mount.")
 
@@ -846,6 +912,12 @@ class ContainerManager:
                 logger.info(f"Cleaning up {len(servers)} server containers...")
 
                 for server in servers:
+                    if not self._manages_container(server):
+                        logger.debug(
+                            "Skipping cleanup for runtime %s", server.runtime_type
+                        )
+                        continue
+
                     container_name = self._get_container_name(server.id, server.name)
                     self._cleanup_existing_container(container_name)
 
