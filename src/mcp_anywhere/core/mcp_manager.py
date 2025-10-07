@@ -1,5 +1,6 @@
 """MCP Manager for handling dynamic server mounting and unmounting."""
 
+import asyncio
 import re
 from typing import Any
 
@@ -11,6 +12,8 @@ from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.security.file_manager import SecureFileManager
 
 logger = get_logger(__name__)
+
+DISCOVERY_TIMEOUT_SECONDS = 20.0
 
 
 def create_mcp_config(server: "MCPServer") -> dict[str, dict[str, Any]]:
@@ -237,7 +240,10 @@ class MCPManager:
             return []
 
         try:
-            tools = await self.mounted_servers[server_id]._tool_manager.get_tools()
+            tools = await asyncio.wait_for(
+                self.mounted_servers[server_id]._tool_manager.get_tools(),
+                timeout=DISCOVERY_TIMEOUT_SECONDS,
+            )
 
             # Convert tools to the format expected by the database
             discovered_tools = []
@@ -251,8 +257,27 @@ class MCPManager:
             )
             return discovered_tools
 
-        except (RuntimeError, ValueError, ConnectionError, AttributeError) as e:
-            logger.error(f"Failed to discover tools for server '{server_id}': {e}")
+        except (
+            RuntimeError,
+            ValueError,
+            ConnectionError,
+            AttributeError,
+            asyncio.TimeoutError,
+        ) as e:
+            if isinstance(e, asyncio.TimeoutError):
+                logger.error(
+                    "Tool discovery timed out for server '%s' after %.1fs",
+                    server_id,
+                    DISCOVERY_TIMEOUT_SECONDS,
+                )
+                wrapped_error: Exception = RuntimeError(
+                    "Tempo limite ao descobrir ferramentas do servidor MCP."
+                )
+            else:
+                logger.error(
+                    f"Failed to discover tools for server '{server_id}': {e}"
+                )
+                wrapped_error = e
 
             # Check container logs for startup errors
             container_manager = ContainerManager()
@@ -268,7 +293,11 @@ class MCPManager:
                         f"Container startup error for server '{server_id}': {error_msg}"
                     )
                     # Re-raise with the more meaningful error message
-                    raise RuntimeError(f"Server startup failed: {error_msg}")
+                    raise RuntimeError(
+                        f"Server startup failed: {error_msg}"
+                    ) from e
 
-            # Re-raise the original error if no better error found
-            raise
+            # Re-raise the original error (or wrapped timeout error) if no better error found
+            if wrapped_error is e:
+                raise
+            raise wrapped_error from e

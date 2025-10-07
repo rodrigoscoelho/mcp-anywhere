@@ -1,7 +1,9 @@
 """Test container startup error handling."""
 
-import pytest
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.database import MCPServer
 
@@ -132,3 +134,63 @@ Process terminated
         
         error_msg = mock_container_manager._extract_error_from_logs(logs)
         assert error_msg == "API credentials not found. Set the API_KEY environment variable."
+
+    @pytest.mark.asyncio
+    async def test_mount_server_timeout_during_tool_discovery(self, monkeypatch):
+        """Ensure that tool discovery timeout surfaces a clear runtime error."""
+        from fastmcp import FastMCP
+        from mcp_anywhere.core import mcp_manager as mcp_manager_module
+        from mcp_anywhere.core.mcp_manager import MCPManager
+
+        monkeypatch.setattr(
+            mcp_manager_module,
+            "DISCOVERY_TIMEOUT_SECONDS",
+            0.01,
+            raising=False,
+        )
+
+        mock_router = MagicMock(spec=FastMCP)
+
+        server = MagicMock(spec=MCPServer)
+        server.id = "timeout123"
+        server.name = "timeout-server"
+        server.runtime_type = "uvx"
+        server.start_command = "uvx timeout-server"
+        server.build_status = "built"
+        server.build_error = None
+        server.env_variables = []
+        server.secret_files = []
+
+        mcp_manager = MCPManager(router=mock_router)
+
+        with patch.object(ContainerManager, "__init__", return_value=None), patch(
+            "mcp_anywhere.core.mcp_manager.create_mcp_config",
+            return_value={
+                "new": {
+                    "command": "docker",
+                    "args": ["run"],
+                    "env": {},
+                    "transport": "stdio",
+                },
+                "existing": {},
+            },
+        ), patch.object(
+            ContainerManager, "_is_container_healthy", return_value=False
+        ), patch.object(
+            ContainerManager, "get_container_error_logs", return_value=""
+        ), patch.object(
+            ContainerManager, "_extract_error_from_logs", return_value=None
+        ):
+            with patch("mcp_anywhere.core.mcp_manager.FastMCP.as_proxy") as mock_proxy:
+                mock_proxy_instance = MagicMock()
+
+                async def never_finishes():
+                    await asyncio.sleep(1)
+
+                mock_proxy_instance._tool_manager.get_tools.side_effect = never_finishes
+                mock_proxy.return_value = mock_proxy_instance
+
+                with pytest.raises(RuntimeError) as exc_info:
+                    await mcp_manager.add_server(server)
+
+        assert "Tempo limite" in str(exc_info.value)
