@@ -40,17 +40,30 @@ async def store_server_tools(
 
         # Add new tools
         for tool_name in tools_to_add:
+            tool_data = discovered_tools_dict[tool_name]
             new_tool = MCPServerTool(
                 server_id=server_config.id,
                 tool_name=tool_name,
-                tool_description=discovered_tools_dict[tool_name]["description"],
+                tool_description=tool_data.get("description"),
                 is_enabled=True,
             )
+            if "schema" in tool_data:
+                new_tool.tool_schema = tool_data["schema"]
             db_session.add(new_tool)
 
         logger.info(
             f"Added {len(tools_to_add)} tools for server '{server_config.name}'"
         )
+
+        # Update existing tools with refreshed metadata
+        for tool_name, existing_tool in existing_tools.items():
+            if tool_name not in discovered_tools_dict:
+                continue
+
+            tool_data = discovered_tools_dict[tool_name]
+            existing_tool.tool_description = tool_data.get("description")
+            if "schema" in tool_data:
+                existing_tool.tool_schema = tool_data["schema"]
 
         # Remove tools that are no longer present
         if tools_to_remove:
