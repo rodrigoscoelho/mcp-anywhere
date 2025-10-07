@@ -1,3 +1,5 @@
+import json
+from time import perf_counter
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -10,6 +12,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
+
+from fastmcp.exceptions import NotFoundError, ToolError
+from pydantic_core import to_jsonable_python
 
 from mcp_anywhere.claude_analyzer import AsyncClaudeAnalyzer
 from mcp_anywhere.container.manager import ContainerManager
@@ -165,6 +170,231 @@ def _extract_env_variables_from_form(form_data: ServerFormData | FormData | None
 
     # Unknown form type; return empty list
     return []
+
+
+def _normalize_schema_type(raw_type: Any) -> str:
+    """Return the first valid JSON schema type from a raw type declaration."""
+
+    if isinstance(raw_type, list):
+        for option in raw_type:
+            if isinstance(option, str):
+                return option
+        return "string"
+    if isinstance(raw_type, str):
+        return raw_type
+    return "string"
+
+
+def _build_tool_form_fields(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """Build metadata to render a tool testing form from a JSON schema."""
+
+    if not isinstance(schema, dict):
+        return {"fields": [], "use_raw_json": True, "raw_examples": []}
+
+    schema_examples = (
+        schema.get("examples")
+        if isinstance(schema.get("examples"), list)
+        else []
+    )
+
+    schema_type = _normalize_schema_type(schema.get("type"))
+    if schema_type != "object":
+        return {
+            "fields": [],
+            "use_raw_json": True,
+            "raw_examples": schema_examples,
+        }
+
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return {
+            "fields": [],
+            "use_raw_json": True,
+            "raw_examples": schema_examples,
+        }
+
+    required_fields = set(schema.get("required") or [])
+    fields: list[dict[str, Any]] = []
+
+    for name, field_schema in properties.items():
+        if not isinstance(field_schema, dict):
+            continue
+
+        json_type = _normalize_schema_type(field_schema.get("type"))
+        enum_options_raw = field_schema.get("enum")
+        enum_options: list[dict[str, Any]] = []
+        if isinstance(enum_options_raw, list) and enum_options_raw:
+            for option in enum_options_raw:
+                try:
+                    serialized = json.dumps(option, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    serialized = json.dumps(str(option), ensure_ascii=False)
+                enum_options.append(
+                    {
+                        "value": serialized,
+                        "label": str(option),
+                    }
+                )
+
+        examples = field_schema.get("examples")
+        placeholder = None
+        if isinstance(examples, list) and examples:
+            placeholder = str(examples[0])
+        elif isinstance(field_schema.get("example"), (str, int, float)):
+            placeholder = str(field_schema["example"])
+
+        default_value = field_schema.get("default")
+        default_serialized = None
+        if enum_options and default_value is not None:
+            try:
+                default_serialized = json.dumps(default_value, ensure_ascii=False)
+            except (TypeError, ValueError):
+                default_serialized = json.dumps(str(default_value), ensure_ascii=False)
+
+        widget = "text"
+        if enum_options:
+            widget = "select"
+        elif json_type in {"integer", "number"}:
+            widget = "number"
+        elif json_type == "boolean":
+            widget = "checkbox"
+        elif json_type in {"object", "array"}:
+            widget = "json"
+
+        fields.append(
+            {
+                "name": name,
+                "label": field_schema.get("title") or name.replace("_", " ").title(),
+                "description": field_schema.get("description"),
+                "required": name in required_fields,
+                "json_type": json_type,
+                "enum": enum_options,
+                "widget": widget,
+                "default": default_value,
+                "default_serialized": default_serialized,
+                "placeholder": placeholder,
+                "format": field_schema.get("format"),
+            }
+        )
+
+    return {
+        "fields": fields,
+        "use_raw_json": False,
+        "raw_examples": schema_examples,
+    }
+
+
+def _parse_tool_form_data(
+    form: FormData,
+    fields: list[dict[str, Any]],
+    use_raw_json: bool,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Parse posted form data into tool arguments using schema metadata."""
+
+    errors: dict[str, str] = {}
+
+    if use_raw_json:
+        raw_payload = (form.get("__raw_payload") or "").strip()
+        if not raw_payload:
+            errors["__raw_payload"] = "Informe um objeto JSON com os argumentos da ferramenta."
+            return {}, errors
+        try:
+            parsed = json.loads(raw_payload)
+        except json.JSONDecodeError as exc:
+            errors["__raw_payload"] = f"JSON inválido: {exc.msg}"
+            return {}, errors
+        if not isinstance(parsed, dict):
+            errors["__raw_payload"] = "O JSON deve representar um objeto de argumentos."
+            return {}, errors
+        return parsed, errors
+
+    arguments: dict[str, Any] = {}
+
+    for field in fields:
+        name = field["name"]
+        widget = field["widget"]
+        raw_value = form.get(name)
+
+        if widget == "checkbox":
+            value = False if raw_value is None else str(raw_value).lower() not in {"false", "0", "off"}
+            arguments[name] = value
+            continue
+
+        if widget == "json":
+            text_value = (raw_value or "").strip()
+            if not text_value:
+                if field.get("required"):
+                    errors[name] = "Este campo é obrigatório."
+                continue
+            try:
+                arguments[name] = json.loads(text_value)
+            except json.JSONDecodeError as exc:
+                errors[name] = f"JSON inválido: {exc.msg}"
+            continue
+
+        if widget == "number":
+            text_value = (raw_value or "").strip()
+            if not text_value:
+                if field.get("required"):
+                    errors[name] = "Este campo é obrigatório."
+                continue
+            try:
+                if field.get("json_type") == "integer":
+                    arguments[name] = int(text_value)
+                else:
+                    arguments[name] = float(text_value)
+            except ValueError:
+                errors[name] = "Informe um número válido."
+            continue
+
+        if widget == "select":
+            text_value = (raw_value or "").strip()
+            if not text_value:
+                if field.get("required"):
+                    errors[name] = "Este campo é obrigatório."
+                continue
+            try:
+                arguments[name] = json.loads(text_value)
+            except json.JSONDecodeError:
+                # Fallback to raw string if json decoding fails
+                arguments[name] = text_value
+            continue
+
+        # Default: treat as simple text input
+        text_value = (raw_value or "").strip()
+        if not text_value:
+            if field.get("required"):
+                errors[name] = "Este campo é obrigatório."
+            continue
+        arguments[name] = text_value
+
+    return arguments, errors
+
+
+def _render_tool_test_result(
+    request: Request,
+    *,
+    tool: MCPServerTool | None,
+    tool_name: str | None,
+    status: str,
+    status_code: int = 200,
+    **context: Any,
+) -> HTMLResponse:
+    """Render the HTMX partial for tool testing feedback."""
+
+    payload = get_template_context(
+        request,
+        tool=tool,
+        tool_name=tool.tool_name if tool else tool_name,
+        status=status,
+        **context,
+    )
+    return templates.TemplateResponse(
+        request,
+        "partials/tool_test_result.html",
+        payload,
+        status_code=status_code,
+    )
 
 
 def _with_query_params(url: str, **params: str) -> str:
@@ -331,10 +561,68 @@ async def server_detail(request: Request) -> HTMLResponse:
             tools_result = await db_session.execute(tools_stmt)
             tools = tools_result.scalars().all()
 
+        tool_test_info: dict[str, dict[str, Any]] = {}
+        mcp_manager = get_mcp_manager(request)
+        server_mounted = bool(mcp_manager and mcp_manager.is_server_mounted(server.id))
+
+        for tool in tools:
+            info: dict[str, Any] = {
+                "available": False,
+                "error": None,
+                "fields": [],
+                "schema": None,
+                "use_raw_json": False,
+                "raw_examples": [],
+            }
+
+            if not tool.is_enabled:
+                info["error"] = "Ferramenta desabilitada. Ative-a para realizar testes."
+            elif not server.is_active:
+                info["error"] = "Servidor inativo. Ative o servidor para testar as ferramentas."
+            elif not mcp_manager:
+                info["error"] = "Gerenciador MCP indisponível neste modo de execução."
+            elif not server_mounted:
+                info["error"] = "Servidor ainda não está montado ou em execução."
+            else:
+                try:
+                    runtime_tool = await mcp_manager.get_runtime_tool(tool.tool_name)
+                except NotFoundError:
+                    info["error"] = (
+                        "Ferramenta não encontrada no runtime atual. Refaça o build do servidor."
+                    )
+                except Exception as exc:  # pragma: no cover - logging defensivo
+                    logger.debug(
+                        "Falha ao carregar metadados da ferramenta %s do servidor %s: %s",
+                        tool.tool_name,
+                        server.id,
+                        exc,
+                    )
+                    info["error"] = "Não foi possível carregar o esquema da ferramenta."
+                else:
+                    schema = runtime_tool.parameters
+                    schema_info = _build_tool_form_fields(schema)
+                    info["schema"] = schema
+                    info["fields"] = schema_info.get("fields", [])
+                    info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
+                    info["raw_examples"] = schema_info.get("raw_examples", [])
+                    info["available"] = True
+
+            tool_test_info[tool.id] = info
+
+        tool_tests_available = any(
+            details.get("available") for details in tool_test_info.values()
+        )
+
         return templates.TemplateResponse(
             request,
             "servers/detail.html",
-            get_template_context(request, server=server, tools=tools),
+            get_template_context(
+                request,
+                server=server,
+                tools=tools,
+                tool_test_info=tool_test_info,
+                tool_tests_available=tool_tests_available,
+            ),
         )
 
     except (RuntimeError, ValueError, ConnectionError) as e:
@@ -734,6 +1022,184 @@ async def toggle_tool(request: Request) -> HTMLResponse:
             get_template_context(request, message="Error toggling tool"),
             status_code=500,
         )
+
+
+async def test_tool(request: Request) -> HTMLResponse:
+    """Executa uma ferramenta MCP manualmente e retorna o resultado renderizado."""
+
+    server_id = request.path_params["server_id"]
+    tool_id = request.path_params["tool_id"]
+
+    async with get_async_session() as db_session:
+        stmt = (
+            select(MCPServerTool)
+            .options(selectinload(MCPServerTool.server))
+            .where(
+                MCPServerTool.id == tool_id,
+                MCPServerTool.server_id == server_id,
+            )
+        )
+        result = await db_session.execute(stmt)
+        tool = result.scalar_one_or_none()
+        server = tool.server if tool else None
+
+    if not tool or not server:
+        return _render_tool_test_result(
+            request,
+            tool=None,
+            tool_name=None,
+            status="error",
+            status_code=404,
+            error_message="Ferramenta não encontrada para este servidor.",
+        )
+
+    if not server.is_active:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=400,
+            error_message="Servidor inativo. Ative-o para executar ferramentas.",
+        )
+
+    if not tool.is_enabled:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=400,
+            error_message="Ferramenta desabilitada. Ative-a para realizar testes.",
+        )
+
+    mcp_manager = get_mcp_manager(request)
+    if not mcp_manager:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=503,
+            error_message="Gerenciador MCP indisponível no momento.",
+        )
+
+    if not mcp_manager.is_server_mounted(server.id):
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=503,
+            error_message="Servidor ainda não está montado. Aguarde a inicialização ou refaça o build.",
+        )
+
+    try:
+        runtime_tool = await mcp_manager.get_runtime_tool(tool.tool_name)
+    except NotFoundError:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=404,
+            error_message="Ferramenta não está disponível no runtime atual.",
+        )
+    except Exception as exc:  # pragma: no cover - logging defensivo
+        logger.exception(
+            "Erro ao obter metadados da ferramenta %s (%s)", tool.tool_name, tool.id
+        )
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=500,
+            error_message="Falha ao carregar a ferramenta a partir do runtime.",
+            error_details=str(exc),
+        )
+
+    schema_info = _build_tool_form_fields(runtime_tool.parameters)
+    use_raw_json = bool(schema_info.get("use_raw_json"))
+    form_fields = schema_info.get("fields", [])
+
+    form_data = await request.form()
+    arguments, validation_errors = _parse_tool_form_data(
+        form_data, form_fields, use_raw_json
+    )
+
+    if validation_errors:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=400,
+            error_message="Corrija os campos destacados antes de executar a ferramenta.",
+            validation_errors=validation_errors,
+        )
+
+    start = perf_counter()
+    try:
+        tool_result = await mcp_manager.call_tool(tool.tool_name, arguments)
+    except ToolError as exc:
+        logger.info(
+            "Execução da ferramenta %s retornou erro: %s",
+            tool.tool_name,
+            exc,
+        )
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=400,
+            error_message=str(exc),
+            arguments_json=json.dumps(
+                to_jsonable_python(arguments), ensure_ascii=False, indent=2
+            ),
+        )
+    except Exception as exc:  # pragma: no cover - logging defensivo
+        logger.exception(
+            "Falha ao executar ferramenta %s (%s)", tool.tool_name, tool.id
+        )
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=500,
+            error_message="Erro inesperado ao executar a ferramenta.",
+            error_details=str(exc),
+        )
+
+    duration_ms = (perf_counter() - start) * 1000
+
+    content_json = json.dumps(
+        to_jsonable_python(tool_result.content), ensure_ascii=False, indent=2
+    )
+    structured_json = None
+    if tool_result.structured_content is not None:
+        structured_json = json.dumps(
+            to_jsonable_python(tool_result.structured_content),
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    arguments_json = json.dumps(
+        to_jsonable_python(arguments), ensure_ascii=False, indent=2
+    )
+
+    return _render_tool_test_result(
+        request,
+        tool=tool,
+        tool_name=tool.tool_name,
+        status="success",
+        arguments_json=arguments_json,
+        result_content_json=content_json,
+        structured_json=structured_json,
+        duration_ms=duration_ms,
+    )
 
 
 async def handle_claude_connection_error(
@@ -1159,6 +1625,11 @@ routes = [
         "/servers/{server_id}/tools/{tool_id}/toggle",
         endpoint=toggle_tool,
         methods=["POST", "GET"],
+    ),
+    Route(
+        "/servers/{server_id}/tools/{tool_id}/test",
+        endpoint=test_tool,
+        methods=["POST"],
     ),
     Route("/servers/{server_id}/delete", endpoint=delete_server, methods=["POST"]),
 ]
