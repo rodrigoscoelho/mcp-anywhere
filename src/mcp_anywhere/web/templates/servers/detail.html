@@ -413,7 +413,10 @@
                     </div>
                 </form>
                 <div id="tool-test-result-{{ tool.id }}" class="mt-4">
-                    {% include 'partials/tool_test_result.html' with status='idle', tool=tool only %}
+                    {% with %}
+                        {% set status = 'idle' %}
+                        {% include 'partials/tool_test_result.html' %}
+                    {% endwith %}
                 </div>
                 {% else %}
                 <div class="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
