@@ -1,14 +1,12 @@
-"""Rotas para configuraAAo LLM (provider/model e OpenRouter API key).
+"""Rotas de configuracoes diversas (LLM, containers, seguranca e operacoes de servico)."""
 
-Responsabilidades:
-- GET /settings/llm: exibe valores efetivos (DB > ENV) e formulArio para alterar provider/model e
-  opcionalmente salvar a OpenRouter API key (criptografada).
-- POST /settings/llm: valida e persiste configuraAAes em DB via settings_store.
-- ProteAAo: redireciona para /auth/login se usuArio nAo autenticado (mesma abordagem usada em outras rotas).
-"""
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
@@ -31,6 +29,55 @@ async def _require_authenticated(request: Request):
 
 def _coerce_form_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+async def _run_command(command: list[str], timeout: float = 20.0) -> dict[str, object]:
+    """Execute um comando externo de forma assíncrona.
+
+    Retorna um dicionário com as chaves:
+    - ok: bool indicando sucesso (returncode == 0)
+    - returncode: código de saída (ou None se não executou)
+    - stdout / stderr: saída decodificada em UTF-8 (sempre strings)
+    - error: mensagem de erro amigável (ex.: comando não encontrado ou timeout)
+    """
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error": f"Comando '{command[0]}' não encontrado no sistema.",
+        }
+
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        return {
+            "ok": False,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error": "Tempo limite excedido ao executar o comando.",
+        }
+
+    stdout_text = stdout_bytes.decode("utf-8", "replace")
+    stderr_text = stderr_bytes.decode("utf-8", "replace")
+    return {
+        "ok": process.returncode == 0,
+        "returncode": process.returncode,
+        "stdout": stdout_text,
+        "stderr": stderr_text,
+        "error": None,
+    }
 
 
 async def settings_llm_get(request: Request) -> Response:
@@ -282,6 +329,84 @@ async def settings_security_post(request: Request) -> Response:
     return RedirectResponse(url="/settings/security?saved=1", status_code=302)
 
 
+async def settings_service_restart(request: Request) -> Response:
+    """Executa `systemctl restart mcp-anywhere` e exibe o resultado."""
+
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    result = await _run_command(["systemctl", "restart", "mcp-anywhere"], timeout=30.0)
+
+    success = bool(result.get("ok"))
+    error_message = result.get("error")
+    stdout_text = (result.get("stdout") or "").strip()
+    stderr_text = (result.get("stderr") or "").strip()
+
+    if not error_message and not success and stderr_text:
+        error_message = stderr_text
+
+    message = "Serviço reiniciado com sucesso." if success else "Falha ao reiniciar o serviço."
+
+    context = {
+        "request": request,
+        "success": success,
+        "message": message,
+        "stdout_text": stdout_text,
+        "stderr_text": stderr_text if error_message != stderr_text else "",
+        "error_message": error_message,
+    }
+
+    status_code = 200 if success else 500
+    return templates.TemplateResponse("settings/service_restart.html", context, status_code=status_code)
+
+
+async def settings_service_logs(request: Request) -> Response:
+    """Exibe as últimas entradas de log do serviço systemd."""
+
+    if not await _require_authenticated(request):
+        login_url = f"/auth/login?next={request.url}"
+        return RedirectResponse(url=login_url, status_code=302)
+
+    limit_param = request.query_params.get("limit", "200")
+    try:
+        limit = max(10, min(1000, int(limit_param)))
+    except ValueError:
+        limit = 200
+
+    command = [
+        "journalctl",
+        "-u",
+        "mcp-anywhere",
+        "--no-pager",
+        "-n",
+        str(limit),
+        "--output",
+        "short-iso",
+    ]
+
+    result = await _run_command(command, timeout=45.0)
+
+    logs_text = (result.get("stdout") or "").strip()
+    stderr_text = (result.get("stderr") or "").strip()
+    error_message = result.get("error")
+
+    if not error_message and not result.get("ok") and stderr_text:
+        error_message = stderr_text
+
+    context = {
+        "request": request,
+        "limit": limit,
+        "logs_text": logs_text,
+        "error_message": error_message,
+        "stderr_text": stderr_text if error_message != stderr_text else "",
+        "last_updated": datetime.utcnow(),
+    }
+
+    status_code = 200 if result.get("ok") else 500
+    return templates.TemplateResponse("settings/service_logs.html", context, status_code=status_code)
+
+
 # Rotas exportadas para serem agregadas em app.py (mesmo padrAo usado por config_routes/secret_routes)
 settings_routes = [
     Route("/settings/llm", endpoint=settings_llm_get, methods=["GET"]),
@@ -290,4 +415,6 @@ settings_routes = [
     Route("/settings/containers", endpoint=settings_containers_post, methods=["POST"]),
     Route("/settings/security", endpoint=settings_security_get, methods=["GET"]),
     Route("/settings/security", endpoint=settings_security_post, methods=["POST"]),
+    Route("/settings/service/restart", endpoint=settings_service_restart, methods=["POST"]),
+    Route("/settings/service/logs", endpoint=settings_service_logs, methods=["GET"]),
 ]

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Reiniciar Serviço - MCP Anywhere{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="bg-white shadow rounded-lg p-6 border border-gray-200">
+        <h1 class="text-2xl font-semibold text-gray-800 mb-4">Reiniciar Serviço MCP Anywhere</h1>
+        <p class="text-gray-600 mb-4">
+            Esta ação executa <code class="bg-gray-100 px-1 py-0.5 rounded">systemctl restart mcp-anywhere</code> no servidor.
+            Utilize quando precisar reiniciar o serviço web principal sem reiniciar a máquina inteira.
+        </p>
+
+        <div class="mb-4">
+            {% if success %}
+                <div class="p-3 rounded bg-green-50 border border-green-200 text-green-700 text-sm">
+                    {{ message }}
+                </div>
+            {% else %}
+                <div class="p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+                    {{ message }}
+                    {% if error_message %}
+                        <div class="mt-2 text-red-600">{{ error_message }}</div>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+
+        {% if stdout_text %}
+            <div class="mb-4">
+                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-1">Saída (stdout)</h2>
+                <pre class="bg-gray-900 text-gray-100 rounded p-4 text-sm overflow-x-auto whitespace-pre-wrap">{{ stdout_text }}</pre>
+            </div>
+        {% endif %}
+
+        {% if stderr_text %}
+            <div class="mb-4">
+                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-1">Saída (stderr)</h2>
+                <pre class="bg-gray-900 text-gray-100 rounded p-4 text-sm overflow-x-auto whitespace-pre-wrap">{{ stderr_text }}</pre>
+            </div>
+        {% endif %}
+
+        <div class="flex flex-wrap gap-3">
+            <form method="POST" action="/settings/service/restart">
+                <button type="submit" class="btn-primary inline-flex items-center px-4 py-2 rounded-lg shadow transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582M20 20v-5h-.581M5.618 9A7.5 7.5 0 0119 7.5M18.382 15A7.5 7.5 0 015 16.5" />
+                    </svg>
+                    Executar novamente
+                </button>
+            </form>
+            <a href="/settings/service/logs" class="btn-info inline-flex items-center px-4 py-2 rounded-lg shadow transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6h13M5 5H3v14h18v2" />
+                </svg>
+                Ver logs do serviço
+            </a>
+            <a href="/" class="btn-neutral inline-flex items-center px-4 py-2 rounded-lg shadow-sm transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                </svg>
+                Voltar ao dashboard
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Logs do Serviço - MCP Anywhere{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-semibold text-gray-800">Logs do Serviço systemd</h1>
+            <p class="text-gray-600 text-sm">Visualize as últimas entradas de <code class="bg-gray-100 px-1 py-0.5 rounded">journalctl -u mcp-anywhere</code>.</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <form method="GET" class="flex items-center gap-2">
+                <label for="limit" class="text-sm text-gray-600">Linhas</label>
+                <input id="limit" name="limit" type="number" min="10" max="1000" step="10" value="{{ limit }}" class="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button type="submit" class="btn-secondary inline-flex items-center px-4 py-2 rounded-lg shadow transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M5 5l5 5M19 19l-5-5" />
+                    </svg>
+                    Atualizar
+                </button>
+            </form>
+            <form method="POST" action="/settings/service/restart">
+                <button type="submit" class="btn-primary inline-flex items-center px-4 py-2 rounded-lg shadow transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582M20 20v-5h-.581M5.618 9A7.5 7.5 0 0119 7.5M18.382 15A7.5 7.5 0 015 16.5" />
+                    </svg>
+                    Reiniciar serviço
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="bg-white shadow rounded-lg border border-gray-200">
+        <div class="border-b border-gray-200 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div class="text-sm text-gray-600">
+                <p><strong>Última atualização:</strong> {{ last_updated.strftime("%d/%m/%Y %H:%M:%S UTC") if last_updated else "-" }}</p>
+                <p><strong>Linhas exibidas:</strong> {{ limit }}</p>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-gray-600">
+                <span>Status:</span>
+                {% if error_message %}
+                    <span class="px-2 py-1 rounded bg-red-100 text-red-700">Falha</span>
+                {% else %}
+                    <span class="px-2 py-1 rounded bg-green-100 text-green-700">OK</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if error_message %}
+            <div class="p-4 text-sm text-red-700 bg-red-50 border-b border-red-100">
+                {{ error_message }}
+            </div>
+        {% endif %}
+        {% if stderr_text %}
+            <div class="p-4 text-sm text-yellow-700 bg-yellow-50 border-b border-yellow-100">
+                {{ stderr_text }}
+            </div>
+        {% endif %}
+
+        <div class="p-4 bg-gray-900 text-gray-100 text-sm overflow-x-auto">
+            {% if logs_text %}
+                <pre class="whitespace-pre-wrap">{{ logs_text }}</pre>
+            {% else %}
+                <p class="text-gray-400">Nenhum log disponível para exibição.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
