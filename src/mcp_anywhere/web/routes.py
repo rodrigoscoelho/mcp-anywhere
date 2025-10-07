@@ -575,20 +575,39 @@ async def server_detail(request: Request) -> HTMLResponse:
                 "raw_examples": [],
             }
 
+            stored_schema = tool.tool_schema if isinstance(tool.tool_schema, dict) else None
+            if stored_schema:
+                schema_info = _build_tool_form_fields(stored_schema)
+                info["schema"] = stored_schema
+                info["fields"] = schema_info.get("fields", [])
+                info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
+                info["raw_examples"] = schema_info.get("raw_examples", [])
+
+            runtime_ready = True
             if not tool.is_enabled:
                 info["error"] = "Ferramenta desabilitada. Ative-a para realizar testes."
+                runtime_ready = False
             elif not server.is_active:
                 info["error"] = "Servidor inativo. Ative o servidor para testar as ferramentas."
+                runtime_ready = False
             elif not mcp_manager:
                 info["error"] = "Gerenciador MCP indisponível neste modo de execução."
+                runtime_ready = False
             elif not server_mounted:
                 info["error"] = "Servidor ainda não está montado ou em execução."
-            else:
+                runtime_ready = False
+
+            if runtime_ready:
                 try:
                     runtime_tool = await mcp_manager.get_runtime_tool(tool.tool_name)
                 except NotFoundError:
                     info["error"] = (
                         "Ferramenta não encontrada no runtime atual. Refaça o build do servidor."
+                    )
+                except TimeoutError:
+                    info["error"] = (
+                        "Tempo limite ao carregar as informações da ferramenta."
+                        " Utilizando os dados já armazenados."
                     )
                 except Exception as exc:  # pragma: no cover - logging defensivo
                     logger.debug(
@@ -606,6 +625,7 @@ async def server_detail(request: Request) -> HTMLResponse:
                     info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
                     info["raw_examples"] = schema_info.get("raw_examples", [])
                     info["available"] = True
+                    info["error"] = None
 
             tool_test_info[tool.id] = info
 
@@ -1104,6 +1124,17 @@ async def test_tool(request: Request) -> HTMLResponse:
             status="error",
             status_code=404,
             error_message="Ferramenta não está disponível no runtime atual.",
+        )
+    except TimeoutError:
+        return _render_tool_test_result(
+            request,
+            tool=tool,
+            tool_name=tool.tool_name,
+            status="error",
+            status_code=504,
+            error_message=(
+                "Tempo limite ao recuperar metadados da ferramenta. Tente novamente mais tarde."
+            ),
         )
     except Exception as exc:  # pragma: no cover - logging defensivo
         logger.exception(

@@ -14,6 +14,7 @@ from mcp_anywhere.security.file_manager import SecureFileManager
 logger = get_logger(__name__)
 
 DISCOVERY_TIMEOUT_SECONDS = 20.0
+TOOL_METADATA_TIMEOUT_SECONDS = 10.0
 
 
 def create_mcp_config(server: "MCPServer") -> dict[str, dict[str, Any]]:
@@ -248,8 +249,16 @@ class MCPManager:
             # Convert tools to the format expected by the database
             discovered_tools = []
             for key, tool in tools.items():
+                schema = getattr(tool, "parameters", None)
+                if not isinstance(schema, dict):
+                    schema = None
+
                 discovered_tools.append(
-                    {"name": key, "description": tool.description or ""}
+                    {
+                        "name": key,
+                        "description": tool.description or "",
+                        "schema": schema,
+                    }
                 )
 
             logger.info(
@@ -310,7 +319,18 @@ class MCPManager:
     async def get_runtime_tool(self, tool_key: str):
         """Retrieve a runtime tool by its prefixed key."""
 
-        return await self.router._tool_manager.get_tool(tool_key)
+        try:
+            return await asyncio.wait_for(
+                self.router._tool_manager.get_tool(tool_key),
+                timeout=TOOL_METADATA_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                (
+                    "Tempo limite ao recuperar metadados da ferramenta "
+                    f"'{tool_key}' após {TOOL_METADATA_TIMEOUT_SECONDS:.1f}s."
+                )
+            ) from exc
 
     async def call_tool(self, tool_key: str, arguments: dict[str, Any]):
         """Execute a tool via the FastMCP router."""
