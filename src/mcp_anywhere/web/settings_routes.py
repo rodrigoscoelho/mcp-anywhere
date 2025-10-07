@@ -346,18 +346,29 @@ async def settings_service_restart(request: Request) -> Response:
     if not error_message and not success and stderr_text:
         error_message = stderr_text
 
-    message = "Serviço reiniciado com sucesso." if success else "Falha ao reiniciar o serviço."
+    # Quando o serviço é reiniciado com sucesso, ele deixa de responder antes
+    # que possamos coletar um status final. Se não houver mensagens de erro
+    # explícitas, consideramos que o reinício foi apenas solicitado.
+    restart_requested = success or (not error_message and not stderr_text)
+
+    if restart_requested:
+        message = (
+            "Reinício do serviço solicitado. Aguarde alguns segundos e recarregue a página."
+        )
+        error_message = None
+    else:
+        message = "Falha ao reiniciar o serviço."
 
     context = {
         "request": request,
-        "success": success,
+        "success": restart_requested,
         "message": message,
         "stdout_text": stdout_text,
-        "stderr_text": stderr_text if error_message != stderr_text else "",
+        "stderr_text": "" if restart_requested else (stderr_text if error_message != stderr_text else ""),
         "error_message": error_message,
     }
 
-    status_code = 200 if success else 500
+    status_code = 200 if restart_requested else 500
     return templates.TemplateResponse("settings/service_restart.html", context, status_code=status_code)
 
 
