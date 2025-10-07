@@ -269,6 +269,170 @@
         {% endif %}
     </div>
 
+    {% if tools %}
+    <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold">Testar ferramentas manualmente</h3>
+            <p class="mt-2 text-sm text-gray-600">
+                Utilize os formulários abaixo para enviar argumentos diretamente para cada ferramenta MCP.
+                O retorno bruto será exibido logo após a execução.
+            </p>
+        </div>
+
+        {% if not tool_tests_available %}
+        <div class="mb-6 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-yellow-800">
+            Todas as ferramentas estão indisponíveis para teste no momento. Verifique se o servidor está ativo e montado.
+        </div>
+        {% endif %}
+
+        <div class="space-y-6">
+            {% for tool in tools %}
+            {% set info = tool_test_info.get(tool.id, {}) %}
+            <div class="rounded-lg border border-gray-200 p-5">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <h4 class="text-base font-semibold text-gray-900">{{ tool.tool_name }}</h4>
+                        <p class="text-sm text-gray-600">{{ tool.tool_description or "Sem descrição cadastrada." }}</p>
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        {% if tool.is_enabled %}
+                            <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Ativa</span>
+                        {% else %}
+                            <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">Desabilitada</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if info.available %}
+                <form
+                    hx-post="/servers/{{ server.id }}/tools/{{ tool.id }}/test"
+                    hx-target="#tool-test-result-{{ tool.id }}"
+                    hx-swap="innerHTML"
+                    class="mt-4 space-y-4"
+                >
+                    {% if info.use_raw_json %}
+                    <div>
+                        <label for="tool-json-{{ tool.id }}" class="mb-2 block text-sm font-medium text-gray-700">
+                            JSON de argumentos
+                        </label>
+                        <textarea
+                            id="tool-json-{{ tool.id }}"
+                            name="__raw_payload"
+                            rows="4"
+                            class="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                            placeholder='{"campo": "valor"}'
+                        ></textarea>
+                        <p class="mt-1 text-xs text-gray-500">
+                            Informe um objeto JSON com os campos esperados pela ferramenta.
+                        </p>
+                        {% if info.raw_examples %}
+                        <details class="mt-2 rounded border border-gray-200 bg-gray-50 p-3">
+                            <summary class="cursor-pointer text-sm font-medium text-gray-700">Exemplo de payload</summary>
+                            <pre class="mt-2 overflow-x-auto rounded bg-gray-900 p-3 font-mono text-xs text-gray-100">{{ info.raw_examples[0]|tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                        {% if info.fields %}
+                        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            {% for field in info.fields %}
+                            <div>
+                                <label for="field-{{ tool.id }}-{{ field.name }}" class="mb-1 block text-sm font-medium text-gray-700">
+                                    {{ field.label }}{% if field.required %}<span class="text-red-500">*</span>{% endif %}
+                                </label>
+                                {% if field.widget == 'select' %}
+                                <select
+                                    id="field-{{ tool.id }}-{{ field.name }}"
+                                    name="{{ field.name }}"
+                                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                                >
+                                    <option value="" {% if field.required %}disabled selected{% endif %}>Selecione...</option>
+                                    {% for option in field.enum %}
+                                    <option value="{{ option.value }}" {% if field.default_serialized and field.default_serialized == option.value %}selected{% endif %}>{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% elif field.widget == 'checkbox' %}
+                                <label class="inline-flex items-center text-sm text-gray-700">
+                                    <input
+                                        type="checkbox"
+                                        id="field-{{ tool.id }}-{{ field.name }}"
+                                        name="{{ field.name }}"
+                                        value="true"
+                                        class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        {% if field.default %}checked{% endif %}
+                                    >
+                                    <span class="ml-2">{{ field.placeholder or 'Ativar' }}</span>
+                                </label>
+                                {% elif field.widget == 'number' %}
+                                <input
+                                    type="number"
+                                    id="field-{{ tool.id }}-{{ field.name }}"
+                                    name="{{ field.name }}"
+                                    value="{% if field.default is not none %}{{ field.default }}{% endif %}"
+                                    {% if field.json_type == 'number' %}step="any"{% else %}step="1"{% endif %}
+                                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                                    {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %}
+                                >
+                                {% elif field.widget == 'json' %}
+                                <textarea
+                                    id="field-{{ tool.id }}-{{ field.name }}"
+                                    name="{{ field.name }}"
+                                    rows="4"
+                                    class="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                                    {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %}
+                                >{% if field.default is not none %}{{ field.default|tojson(indent=2) }}{% endif %}</textarea>
+                                {% else %}
+                                <input
+                                    type="text"
+                                    id="field-{{ tool.id }}-{{ field.name }}"
+                                    name="{{ field.name }}"
+                                    value="{% if field.default is not none %}{{ field.default }}{% endif %}"
+                                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                                    {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %}
+                                >
+                                {% endif %}
+                                {% if field.description %}
+                                <p class="mt-1 text-xs text-gray-500">{{ field.description }}</p>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-sm text-gray-500">Esta ferramenta não exige argumentos. Você pode executá-la diretamente.</p>
+                        {% endif %}
+                    {% endif %}
+
+                    <div class="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                        <span class="text-xs text-gray-500">Os argumentos são enviados como JSON para o servidor MCP.</span>
+                        <button
+                            type="submit"
+                            class="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        >
+                            Executar ferramenta
+                        </button>
+                    </div>
+                </form>
+                <div id="tool-test-result-{{ tool.id }}" class="mt-4">
+                    {% include 'partials/tool_test_result.html' with status='idle', tool=tool only %}
+                </div>
+                {% else %}
+                <div class="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                    {{ info.error or 'Ferramenta indisponível para testes.' }}
+                </div>
+                {% endif %}
+
+                {% if info.schema %}
+                <details class="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
+                    <summary class="cursor-pointer text-sm font-medium text-gray-700">Ver schema completo da ferramenta</summary>
+                    <pre class="mt-2 overflow-x-auto rounded bg-gray-900 p-3 font-mono text-xs text-gray-100">{{ info.schema|tojson(indent=2) }}</pre>
+                </details>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Back Navigation -->
     <div class="flex justify-start">
         <a href="/" 

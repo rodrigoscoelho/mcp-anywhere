@@ -16,6 +16,7 @@ from mcp_anywhere.settings_store import (
     get_effective_setting,
     set_app_setting,
 )
+from mcp_anywhere.web.routes import get_template_context
 
 templates = Jinja2Templates(directory="src/mcp_anywhere/web/templates")
 logger = get_logger(__name__)
@@ -80,6 +81,39 @@ async def _run_command(command: list[str], timeout: float = 20.0) -> dict[str, o
     }
 
 
+async def _build_llm_context(
+    request: Request, overrides: dict[str, object] | None = None
+) -> dict[str, object]:
+    """Monta o contexto padrAo para a pAgina de configuraAAes LLM."""
+
+    provider_atual = await get_effective_setting("llm.provider")
+    model_atual = await get_effective_setting("llm.model")
+
+    provider_row = await get_app_setting("llm.provider")
+    model_row = await get_app_setting("llm.model")
+
+    provider_persistido = provider_row[0] if provider_row else None
+    model_persistido = model_row[0] if model_row else None
+
+    key_row = await get_app_setting("llm.openrouter_api_key")
+    has_openrouter_key_persisted = bool(key_row and key_row[0])
+
+    context = get_template_context(
+        request,
+        provider_atual=provider_atual,
+        model_atual=model_atual,
+        provider_persistido=provider_persistido,
+        model_persistido=model_persistido,
+        has_openrouter_key_persisted=has_openrouter_key_persisted,
+        message=None,
+    )
+
+    if overrides:
+        context.update(overrides)
+
+    return context
+
+
 async def settings_llm_get(request: Request) -> Response:
     """Renderiza a pAgina de configuraAAes LLM.
 
@@ -96,35 +130,16 @@ async def settings_llm_get(request: Request) -> Response:
         return RedirectResponse(url=login_url, status_code=302)
 
     # Valores efetivos
-    provider_atual = await get_effective_setting("llm.provider")
-    model_atual = await get_effective_setting("llm.model")
-
-    # Valores persistidos (raw) para preencher o formulArio se existirem
-    provider_row = await get_app_setting("llm.provider")
-    model_row = await get_app_setting("llm.model")
-
-    provider_persistido = provider_row[0] if provider_row else None
-    model_persistido = model_row[0] if model_row else None
-
-    # Indica se hA chave OpenRouter salva (nAo exibimos o conteAodo)
-    key_row = await get_app_setting("llm.openrouter_api_key")
-    has_openrouter_key_persisted = bool(key_row and key_row[0])
-
-    # Mensagem simples via query param (padrAo existente no projeto)
     saved = request.query_params.get("saved")
-    message = "ConfiguraAAes salvas com sucesso." if saved else None
+    context = await _build_llm_context(
+        request,
+        overrides={"message": "ConfiguraAAes salvas com sucesso." if saved else None},
+    )
 
     return templates.TemplateResponse(
+        request,
         "settings/llm.html",
-        {
-            "request": request,
-            "provider_atual": provider_atual,
-            "model_atual": model_atual,
-            "provider_persistido": provider_persistido,
-            "model_persistido": model_persistido,
-            "has_openrouter_key_persisted": has_openrouter_key_persisted,
-            "message": message,
-        },
+        context,
     )
 
 
@@ -151,12 +166,18 @@ async def settings_llm_post(request: Request) -> Response:
 
     # ValidaAAes
     if provider not in {"anthropic", "openrouter"}:
-        return templates.TemplateResponse(
-            "settings/llm.html",
-            {
-                "request": request,
+        context = await _build_llm_context(
+            request,
+            overrides={
                 "message": "Provider invAlido. Valor permitido: 'anthropic' ou 'openrouter'.",
+                "provider_persistido": provider,
+                "model_persistido": model,
             },
+        )
+        return templates.TemplateResponse(
+            request,
+            "settings/llm.html",
+            context,
             status_code=400,
         )
 
@@ -166,12 +187,18 @@ async def settings_llm_post(request: Request) -> Response:
     }
     expected_model = valid_models.get(provider)
     if model != expected_model:
-        return templates.TemplateResponse(
-            "settings/llm.html",
-            {
-                "request": request,
+        context = await _build_llm_context(
+            request,
+            overrides={
                 "message": "Model invAlido para o provider selecionado.",
+                "provider_persistido": provider,
+                "model_persistido": model,
             },
+        )
+        return templates.TemplateResponse(
+            request,
+            "settings/llm.html",
+            context,
             status_code=400,
         )
 
@@ -184,9 +211,18 @@ async def settings_llm_post(request: Request) -> Response:
             await set_app_setting("llm.openrouter_api_key", openrouter_api_key, encrypt=True)
     except Exception as exc:
         logger.exception("Erro salvando configuraAAes LLM")
+        context = await _build_llm_context(
+            request,
+            overrides={
+                "message": f"Falha ao salvar: {str(exc)}",
+                "provider_persistido": provider,
+                "model_persistido": model,
+            },
+        )
         return templates.TemplateResponse(
+            request,
             "settings/llm.html",
-            {"request": request, "message": f"Falha ao salvar: {str(exc)}"},
+            context,
             status_code=500,
         )
 
@@ -210,12 +246,13 @@ async def settings_containers_get(request: Request) -> Response:
     message = "Preferencia salva com sucesso." if saved else None
 
     return templates.TemplateResponse(
+        request,
         "settings/containers.html",
-        {
-            "request": request,
-            "preserve_enabled": preserve_enabled,
-            "message": message,
-        },
+        get_template_context(
+            request,
+            preserve_enabled=preserve_enabled,
+            message=message,
+        ),
     )
 
 
@@ -248,12 +285,13 @@ async def settings_containers_post(request: Request) -> Response:
     except Exception as exc:
         logger.exception("Erro salvando preservacao de containers")
         return templates.TemplateResponse(
+            request,
             "settings/containers.html",
-            {
-                "request": request,
-                "message": f"Falha ao salvar: {exc}",
-                "preserve_enabled": preserve_enabled,
-            },
+            get_template_context(
+                request,
+                message=f"Falha ao salvar: {exc}",
+                preserve_enabled=preserve_enabled,
+            ),
             status_code=500,
         )
 
@@ -275,12 +313,13 @@ async def settings_security_get(request: Request) -> Response:
     message = "ConfiguraAAes salvas com sucesso." if saved else None
 
     return templates.TemplateResponse(
+        request,
         "settings/security.html",
-        {
-            "request": request,
-            "auth_disabled": auth_disabled,
-            "message": message,
-        },
+        get_template_context(
+            request,
+            auth_disabled=auth_disabled,
+            message=message,
+        ),
     )
 
 
@@ -295,14 +334,13 @@ async def settings_security_post(request: Request) -> Response:
 
     if mode not in {"require", "disable"}:
         return templates.TemplateResponse(
+            request,
             "settings/security.html",
-            {
-                "request": request,
-                "auth_disabled": getattr(
-                    request.app.state, "mcp_auth_disabled", False
-                ),
-                "message": "Valor invAlido para modo de autenticaAAo.",
-            },
+            get_template_context(
+                request,
+                auth_disabled=getattr(request.app.state, "mcp_auth_disabled", False),
+                message="Valor invAlido para modo de autenticaAAo.",
+            ),
             status_code=400,
         )
 
@@ -313,14 +351,13 @@ async def settings_security_post(request: Request) -> Response:
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("Erro salvando configuraAAo de autenticaAAo", exc_info=exc)
         return templates.TemplateResponse(
+            request,
             "settings/security.html",
-            {
-                "request": request,
-                "auth_disabled": getattr(
-                    request.app.state, "mcp_auth_disabled", False
-                ),
-                "message": f"Falha ao salvar: {exc}",
-            },
+            get_template_context(
+                request,
+                auth_disabled=getattr(request.app.state, "mcp_auth_disabled", False),
+                message=f"Falha ao salvar: {exc}",
+            ),
             status_code=500,
         )
 
@@ -359,17 +396,24 @@ async def settings_service_restart(request: Request) -> Response:
     else:
         message = "Falha ao reiniciar o serviço."
 
-    context = {
-        "request": request,
-        "success": restart_requested,
-        "message": message,
-        "stdout_text": stdout_text,
-        "stderr_text": "" if restart_requested else (stderr_text if error_message != stderr_text else ""),
-        "error_message": error_message,
-    }
+    context = get_template_context(
+        request,
+        success=restart_requested,
+        message=message,
+        stdout_text=stdout_text,
+        stderr_text=""
+        if restart_requested
+        else (stderr_text if error_message != stderr_text else ""),
+        error_message=error_message,
+    )
 
     status_code = 200 if restart_requested else 500
-    return templates.TemplateResponse("settings/service_restart.html", context, status_code=status_code)
+    return templates.TemplateResponse(
+        request,
+        "settings/service_restart.html",
+        context,
+        status_code=status_code,
+    )
 
 
 async def settings_service_logs(request: Request) -> Response:
@@ -405,17 +449,22 @@ async def settings_service_logs(request: Request) -> Response:
     if not error_message and not result.get("ok") and stderr_text:
         error_message = stderr_text
 
-    context = {
-        "request": request,
-        "limit": limit,
-        "logs_text": logs_text,
-        "error_message": error_message,
-        "stderr_text": stderr_text if error_message != stderr_text else "",
-        "last_updated": datetime.utcnow(),
-    }
+    context = get_template_context(
+        request,
+        limit=limit,
+        logs_text=logs_text,
+        error_message=error_message,
+        stderr_text=stderr_text if error_message != stderr_text else "",
+        last_updated=datetime.utcnow(),
+    )
 
     status_code = 200 if result.get("ok") else 500
-    return templates.TemplateResponse("settings/service_logs.html", context, status_code=status_code)
+    return templates.TemplateResponse(
+        request,
+        "settings/service_logs.html",
+        context,
+        status_code=status_code,
+    )
 
 
 # Rotas exportadas para serem agregadas em app.py (mesmo padrAo usado por config_routes/secret_routes)

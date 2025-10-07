@@ -301,3 +301,18 @@ class MCPManager:
             if wrapped_error is e:
                 raise
             raise wrapped_error from e
+
+    def is_server_mounted(self, server_id: str) -> bool:
+        """Return True if the server is currently mounted in FastMCP."""
+
+        return server_id in self.mounted_servers
+
+    async def get_runtime_tool(self, tool_key: str):
+        """Retrieve a runtime tool by its prefixed key."""
+
+        return await self.router._tool_manager.get_tool(tool_key)
+
+    async def call_tool(self, tool_key: str, arguments: dict[str, Any]):
+        """Execute a tool via the FastMCP router."""
+
+        return await self.router._tool_manager.call_tool(tool_key, arguments)
