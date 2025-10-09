@@ -275,11 +275,7 @@ class MCPManager:
             asyncio.TimeoutError,
         ) as e:
             if isinstance(e, asyncio.TimeoutError):
-                logger.error(
-                    "Tool discovery timed out for server '%s' after %.1fs",
-                    server_id,
-                    DISCOVERY_TIMEOUT_SECONDS,
-                )
+                logger.error(f"Tool discovery timed out for server '{server_id}' after {DISCOVERY_TIMEOUT_SECONDS:.1f}s")
                 wrapped_error: Exception = RuntimeError(
                     "Tempo limite ao descobrir ferramentas do servidor MCP."
                 )
@@ -345,7 +341,7 @@ class MCPManager:
             Tool execution result
         """
         
-        logger.debug("DEBUG: Executando ferramenta via HTTP para garantir contexto: %s", tool_key)
+        logger.debug("DEBUG: Executando ferramenta via HTTP para garantir contexto: {}", tool_key)
         
         # Create HTTP client with ASGI transport
         if self._http_client is None:
@@ -366,7 +362,7 @@ class MCPManager:
                 }
             }
             
-            logger.debug("DEBUG: Fazendo requisição HTTP para %s com payload: %s", mcp_path, payload)
+            logger.debug(f"DEBUG: Fazendo requisição HTTP para {mcp_path} com payload: {payload}")
             
             response = await self._http_client.post(
                 mcp_path,
@@ -376,18 +372,15 @@ class MCPManager:
             
             if response.status_code == 200:
                 result = response.json()
-                logger.debug("DEBUG: Chamada HTTP bem sucedida: %s", result)
+                logger.debug(f"DEBUG: Chamada HTTP bem sucedida: {result}")
                 return result.get("result", result)
             else:
-                logger.error(
-                    "DEBUG: Falha na chamada HTTP: status=%d, response='%s', url='%s'",
-                    response.status_code, response.text, mcp_path
-                )
+                logger.error(f"DEBUG: Falha na chamada HTTP: status={response.status_code}, response='{response.text}', url='{mcp_path}'")
                 # Fallback to direct call
                 return await self.call_tool(tool_key, arguments, app)
                 
         except Exception as e:
-            logger.error("DEBUG: Erro na chamada HTTP: %s", e)
+            logger.error(f"DEBUG: Erro na chamada HTTP: {e}")
             # Fallback to direct call
             return await self.call_tool(tool_key, arguments, app)
 
@@ -397,10 +390,7 @@ class MCPManager:
         Always tries to execute via HTTP request to the FastMCP endpoint when app is provided,
         as this ensures proper context establishment. Falls back to direct calls if HTTP fails.
         """
-        logger.debug(
-            "DEBUG: call_tool chamado - tool_key=%s, arguments=%s, app_provided=%s",
-            tool_key, arguments, bool(app)
-        )
+        logger.debug(f"DEBUG: call_tool chamado - tool_key={tool_key}, arguments={arguments}, app_provided={bool(app)}")
 
         # Always try HTTP path first when app is available (recommended approach)
         if app is not None:
@@ -408,7 +398,7 @@ class MCPManager:
                 logger.debug("DEBUG: Executando ferramenta via HTTP (recomendado)")
                 return await self.call_tool_via_http(tool_key, arguments, app)
             except Exception as http_exc:
-                logger.warning("DEBUG: Falha na chamada HTTP: %s. Tentando fallback direto.", http_exc)
+                logger.warning(f"DEBUG: Falha na chamada HTTP: {http_exc}. Tentando fallback direto.")
 
         # Fallback: try to use the FastMCP context if available
         try:
@@ -417,21 +407,18 @@ class MCPManager:
             logger.debug("DEBUG: Contexto FastMCP encontrado, executando diretamente")
             return await self.router._tool_manager.call_tool(tool_key, arguments)
         except RuntimeError as ctx_err:
-            logger.warning(
-                "DEBUG: Contexto FastMCP não disponível: %s. Tentando chamada direta sem contexto.",
-                ctx_err
-            )
+            logger.warning(f"DEBUG: Contexto FastMCP não disponível: {ctx_err}. Tentando chamada direta sem contexto.")
             # Context not available; try direct call as last resort
             try:
                 return await self.router._tool_manager.call_tool(tool_key, arguments)
             except Exception as direct_err:
-                logger.error("DEBUG: Falha na chamada direta ao tool_manager: %s", direct_err)
+                logger.error(f"DEBUG: Falha na chamada direta ao tool_manager: {direct_err}")
                 raise
         except Exception as e:
-            logger.debug("DEBUG: Erro inesperado ao verificar contexto: %s", e)
+            logger.debug(f"DEBUG: Erro inesperado ao verificar contexto: {e}")
             # Final fallback: direct call to the tool manager
             try:
                 return await self.router._tool_manager.call_tool(tool_key, arguments)
             except Exception as direct_err:
-                logger.error("DEBUG: Falha na chamada direta ao tool_manager (final): %s", direct_err)
+                logger.error(f"DEBUG: Falha na chamada direta ao tool_manager (final): {direct_err}")
                 raise
