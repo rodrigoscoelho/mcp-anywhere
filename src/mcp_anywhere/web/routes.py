@@ -1460,13 +1460,23 @@ async def test_tool(request: Request) -> HTMLResponse:
 
         duration_ms = (perf_counter() - start) * 1000
 
+        # Handle both dict and object responses
+        # When called via HTTP, tool_result is a dict
+        # When called directly, tool_result is an object with attributes
+        if isinstance(tool_result, dict):
+            content = tool_result.get("content", [])
+            structured_content = tool_result.get("structured_content")
+        else:
+            content = tool_result.content
+            structured_content = tool_result.structured_content
+
         content_json = json.dumps(
-            to_jsonable_python(tool_result.content), ensure_ascii=False, indent=2
+            to_jsonable_python(content), ensure_ascii=False, indent=2
         )
         structured_json = None
-        if tool_result.structured_content is not None:
+        if structured_content is not None:
             structured_json = json.dumps(
-                to_jsonable_python(tool_result.structured_content),
+                to_jsonable_python(structured_content),
                 ensure_ascii=False,
                 indent=2,
             )

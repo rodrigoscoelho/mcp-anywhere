@@ -59,7 +59,7 @@ class _RenamedToolManager:
             return self._runtime_tool
         raise NotFoundError(f"Unexpected tool key {tool_key!r}")
 
-    async def call_tool(self, tool_key: str, arguments: dict):
+    async def call_tool(self, tool_key: str, arguments: dict, app=None):
         if tool_key != self._runtime_tool.key:
             raise NotFoundError(f"Tool {tool_key!r} not found")
         return type(
@@ -70,6 +70,32 @@ class _RenamedToolManager:
                 "structured_content": None,
             },
         )()
+
+
+class _DictResponseToolManager:
+    """Manager that returns dict responses (like HTTP calls) instead of objects."""
+    def __init__(self, server_id: str, runtime_tool: _RuntimeToolStub):
+        self._server_id = server_id
+        self._runtime_tool = runtime_tool
+        self.mounted_servers = {server_id: _MountedServerStub(runtime_tool)}
+
+    def is_server_mounted(self, server_id: str) -> bool:
+        return server_id == self._server_id
+
+    async def get_runtime_tool(self, tool_key: str):
+        if tool_key == self._runtime_tool.key:
+            return self._runtime_tool
+        raise NotFoundError(f"Tool {tool_key!r} not found")
+
+    async def call_tool(self, tool_key: str, arguments: dict, app=None):
+        """Return a dict response to simulate HTTP call results."""
+        if tool_key != self._runtime_tool.key:
+            raise NotFoundError(f"Tool {tool_key!r} not found")
+        # Return dict instead of object (simulates HTTP response)
+        return {
+            "content": [{"type": "text", "text": "dict response ok"}],
+            "structured_content": None,
+        }
 
 
 async def _set_admin_password(app, password: str) -> None:
@@ -241,4 +267,56 @@ async def test_tool_route_resyncs_tool_key(app, client):
         refreshed_tool = await session.get(MCPServerTool, tool_id)
         assert refreshed_tool is not None
         assert refreshed_tool.tool_name == new_key
+
+
+@pytest.mark.asyncio
+async def test_tool_route_handles_dict_response(app, client):
+    """Test that tool execution handles dict responses (from HTTP calls) correctly."""
+    async with get_async_session() as session:
+        suffix = uuid.uuid4().hex[:6]
+        server = MCPServer(
+            name=f"Dict Response Server {suffix}",
+            github_url="https://example.com/repo.git",
+            runtime_type="docker",
+            install_command="pip install -r requirements.txt",
+            start_command="uv run start",
+            env_variables=[],
+            is_active=True,
+            build_status="built",
+        )
+        session.add(server)
+        await session.flush()
+
+        tool_key = "dict.tool/test"
+        tool = MCPServerTool(
+            server_id=server.id,
+            tool_name=tool_key,
+            tool_description="Dict response tool",
+            tool_schema={"type": "object", "properties": {}},
+            is_enabled=True,
+        )
+        session.add(tool)
+        await session.commit()
+
+        server_id = server.id
+        tool_id = tool.id
+
+    await _set_admin_password(app, "DictPass123!")
+    login_response = await client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "DictPass123!"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    runtime_tool = _RuntimeToolStub(tool_key, description="Dict response tool")
+    app.state.mcp_manager = _DictResponseToolManager(server_id, runtime_tool)
+
+    response = await client.post(
+        f"/servers/{server_id}/tools/{tool_id}/test",
+        data={},
+    )
+    assert response.status_code == 200
+    assert "Ferramenta executada com sucesso" in response.text
+    assert "dict response ok" in response.text
 
