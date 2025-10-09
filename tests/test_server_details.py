@@ -110,6 +110,7 @@ async def _set_admin_password(app, password: str) -> None:
 
 @pytest.mark.asyncio
 async def test_server_detail_uses_cached_schema_on_timeout(app, client):
+    """Test that server detail page uses cached schema and doesn't call runtime when schema is available."""
     async with get_async_session() as session:
         server_name = f"Timeout Server {uuid.uuid4().hex[:6]}"
         server = MCPServer(
@@ -153,12 +154,64 @@ async def test_server_detail_uses_cached_schema_on_timeout(app, client):
 
     response = await client.get(f"/servers/{server_id}")
     assert response.status_code == 200
+    # With optimization: schema is cached, so no runtime call is made (no timeout)
+    # The tool should be available because we have the schema stored
+    assert "message" in response.text  # Schema field should be visible
+    assert timeout_manager.calls == 0  # No runtime calls made (optimization working!)
+
+
+@pytest.mark.asyncio
+async def test_server_detail_calls_runtime_when_no_cached_schema(app, client):
+    """Test that server detail page calls runtime when no schema is cached."""
+    async with get_async_session() as session:
+        server_name = f"No Schema Server {uuid.uuid4().hex[:6]}"
+        server = MCPServer(
+            name=server_name,
+            github_url="https://example.com/repo.git",
+            runtime_type="docker",
+            install_command="pip install -r requirements.txt",
+            start_command="uv run start",
+            env_variables=[],
+            is_active=True,
+            build_status="built",
+        )
+        session.add(server)
+        await session.flush()
+
+        # Tool WITHOUT schema - should trigger runtime call
+        tool = MCPServerTool(
+            server_id=server.id,
+            tool_name=f"{server_name}.tool/echo",
+            tool_description="Echo tool",
+            tool_schema=None,  # No schema stored
+            is_enabled=True,
+        )
+        session.add(tool)
+        await session.commit()
+
+        server_id = server.id
+
+    await _set_admin_password(app, "NoSchemaPass123!")
+    login_response = await client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "NoSchemaPass123!"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    timeout_manager = _TimeoutManager()
+    app.state.mcp_manager = timeout_manager
+
+    response = await client.get(f"/servers/{server_id}")
+    assert response.status_code == 200
+    # Without cached schema: runtime call is made and times out
     assert "Tempo limite ao carregar as informações da ferramenta." in response.text
-    assert timeout_manager.calls == 1
+    assert timeout_manager.calls == 1  # Runtime call was made
 
 
 @pytest.mark.asyncio
 async def test_server_detail_resyncs_tool_key(app, client):
+    """Test that server detail page resyncs tool key when no schema is cached."""
     async with get_async_session() as session:
         suffix = uuid.uuid4().hex[:6]
         server = MCPServer(
@@ -179,7 +232,7 @@ async def test_server_detail_resyncs_tool_key(app, client):
             server_id=server.id,
             tool_name=stale_key,
             tool_description="Echo tool",
-            tool_schema={"type": "object", "properties": {}},
+            tool_schema=None,  # No schema - forces runtime lookup and resync
             is_enabled=True,
         )
         session.add(tool)

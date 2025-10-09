@@ -712,14 +712,8 @@ async def server_detail(request: Request) -> HTMLResponse:
                 stored_schema = (
                     tool.tool_schema if isinstance(tool.tool_schema, dict) else None
                 )
-                if stored_schema:
-                    schema_info = _build_tool_form_fields(stored_schema)
-                    info["schema"] = stored_schema
-                    info["fields"] = schema_info.get("fields", [])
-                    info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
-                    info["raw_examples"] = schema_info.get("raw_examples", [])
 
-                runtime_tool = None
+                # Check if tool can be tested
                 runtime_ready = True
                 if not tool.is_enabled:
                     info["error"] = "Ferramenta desabilitada. Ative-a para realizar testes."
@@ -734,45 +728,60 @@ async def server_detail(request: Request) -> HTMLResponse:
                     info["error"] = "Servidor ainda não está montado ou em execução."
                     runtime_ready = False
 
-                if runtime_ready and mcp_manager:
-                    try:
-                        runtime_tool = await mcp_manager.get_runtime_tool(tool.tool_name)
-                    except NotFoundError:
-                        runtime_tool, updated = await _refresh_runtime_tool_registration(
-                            db_session, mcp_manager, server, tool
-                        )
-                        tools_updated = tools_updated or updated
-                        if not runtime_tool:
-                            info["error"] = (
-                                "Ferramenta não encontrada no runtime atual. Refaça o build do servidor."
-                            )
-                    except TimeoutError:
-                        info["error"] = (
-                            "Tempo limite ao carregar as informações da ferramenta."
-                            " Utilizando os dados já armazenados."
-                        )
-                    except Exception as exc:  # pragma: no cover - logging defensivo
-                        logger.debug(
-                            "Falha ao carregar metadados da ferramenta %s do servidor %s: %s",
-                            tool.tool_name,
-                            server.id,
-                            exc,
-                        )
-                        info["error"] = "Não foi possível carregar o esquema da ferramenta."
-
-                if runtime_tool:
-                    schema = getattr(runtime_tool, "parameters", None)
-                    schema_dict = schema if isinstance(schema, dict) else {}
-                    schema_info = _build_tool_form_fields(schema_dict)
-                    info["schema"] = schema_dict
+                # Use stored schema if available (optimization: avoid runtime calls)
+                if stored_schema:
+                    schema_info = _build_tool_form_fields(stored_schema)
+                    info["schema"] = stored_schema
                     info["fields"] = schema_info.get("fields", [])
                     info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
                     info["raw_examples"] = schema_info.get("raw_examples", [])
-                    info["available"] = True
-                    info["error"] = None
-                    if schema_dict and schema_dict != (tool.tool_schema or {}):
-                        tool.tool_schema = schema_dict
-                        tools_updated = True
+                    # Mark as available if runtime is ready
+                    if runtime_ready:
+                        info["available"] = True
+                        info["error"] = None
+                else:
+                    # No stored schema: need to fetch from runtime
+                    runtime_tool = None
+                    if runtime_ready and mcp_manager:
+                        try:
+                            runtime_tool = await mcp_manager.get_runtime_tool(tool.tool_name)
+                        except NotFoundError:
+                            runtime_tool, updated = await _refresh_runtime_tool_registration(
+                                db_session, mcp_manager, server, tool
+                            )
+                            tools_updated = tools_updated or updated
+                            if not runtime_tool:
+                                info["error"] = (
+                                    "Ferramenta não encontrada no runtime atual. Refaça o build do servidor."
+                                )
+                        except TimeoutError:
+                            info["error"] = (
+                                "Tempo limite ao carregar as informações da ferramenta."
+                                " Utilizando os dados já armazenados."
+                            )
+                        except Exception as exc:  # pragma: no cover - logging defensivo
+                            logger.debug(
+                                "Falha ao carregar metadados da ferramenta %s do servidor %s: %s",
+                                tool.tool_name,
+                                server.id,
+                                exc,
+                            )
+                            info["error"] = "Não foi possível carregar o esquema da ferramenta."
+
+                    if runtime_tool:
+                        schema = getattr(runtime_tool, "parameters", None)
+                        schema_dict = schema if isinstance(schema, dict) else {}
+                        schema_info = _build_tool_form_fields(schema_dict)
+                        info["schema"] = schema_dict
+                        info["fields"] = schema_info.get("fields", [])
+                        info["use_raw_json"] = bool(schema_info.get("use_raw_json"))
+                        info["raw_examples"] = schema_info.get("raw_examples", [])
+                        info["available"] = True
+                        info["error"] = None
+                        # Store schema for future use
+                        if schema_dict:
+                            tool.tool_schema = schema_dict
+                            tools_updated = True
 
                 tool_test_info[tool.id] = info
 
