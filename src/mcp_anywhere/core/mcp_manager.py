@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from mcp_anywhere.container.manager import ContainerManager
 from mcp_anywhere.database import MCPServer
@@ -386,10 +387,51 @@ class MCPManager:
                         logger.debug(f"DEBUG: Chamada HTTP bem sucedida: {result}")
                         return result.get("result", result)
                     if "text/event-stream" in content_type:
-                        # Return the raw stream text for now; parsing SSE can be added later
+                        # Parse SSE stream to extract the result
                         stream_text = response.text
-                        logger.debug("DEBUG: Chamada HTTP retornou SSE stream")
-                        return {"stream": stream_text}
+                        logger.debug(f"DEBUG: Chamada HTTP retornou SSE stream, parseando...")
+                        logger.debug(f"DEBUG: SSE stream completo (primeiros 500 chars): {stream_text[:500]}")
+
+                        # Parse SSE format: lines starting with "data: " contain JSON
+                        import json as json_module
+                        result_data = None
+                        error_data = None
+                        for line in stream_text.split('\n'):
+                            line = line.strip()
+                            if line.startswith('data: '):
+                                try:
+                                    data_json = line[6:]  # Remove "data: " prefix
+                                    logger.debug(f"DEBUG: Tentando parsear data line: {data_json[:200]}")
+                                    parsed = json_module.loads(data_json)
+                                    # Look for the result or error in the parsed data
+                                    if isinstance(parsed, dict):
+                                        if "error" in parsed:
+                                            error_data = parsed["error"]
+                                            logger.error(f"DEBUG: Erro retornado pela ferramenta: {error_data}")
+                                            # Raise ToolError with the error message
+                                            error_msg = error_data.get("message", "Unknown error")
+                                            error_details = error_data.get("data", "")
+                                            full_msg = f"{error_msg}: {error_details}" if error_details else error_msg
+                                            raise ToolError(full_msg)
+                                        elif "result" in parsed:
+                                            result_data = parsed["result"]
+                                            logger.debug(f"DEBUG: Encontrado result no SSE: {result_data}")
+                                        elif "content" in parsed:
+                                            result_data = parsed
+                                            logger.debug(f"DEBUG: Encontrado content no SSE: {result_data}")
+                                except ToolError:
+                                    # Re-raise ToolError to be handled by the caller
+                                    raise
+                                except (json_module.JSONDecodeError, ValueError) as e:
+                                    logger.debug(f"DEBUG: Erro ao parsear linha SSE: {line[:100]}... - {e}")
+                                    continue
+
+                        if result_data is not None:
+                            logger.debug(f"DEBUG: SSE parseado com sucesso: {result_data}")
+                            return result_data
+                        else:
+                            logger.warning(f"DEBUG: Não foi possível extrair resultado do SSE stream: {stream_text[:200]}...")
+                            return {"stream": stream_text}
 
                     # Unknown content type: return raw text
                     raw_text = response.text
