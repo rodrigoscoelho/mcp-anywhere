@@ -363,26 +363,60 @@ class MCPManager:
             }
             
             logger.debug(f"DEBUG: Fazendo requisição HTTP para {mcp_path} com payload: {payload}")
-            
-            response = await self._http_client.post(
-                mcp_path,
-                json=payload,
-                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                logger.debug(f"DEBUG: Chamada HTTP bem sucedida: {result}")
-                return result.get("result", result)
-            else:
-                logger.error(f"DEBUG: Falha na chamada HTTP: status={response.status_code}, response='{response.text}', url='{mcp_path}'")
-                # Fallback to direct call
-                return await self.call_tool(tool_key, arguments, app)
-                
+
+            # Prepare headers including any persistent mcp session id
+            headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+            if getattr(self, "_mcp_session_id", None):
+                headers["mcp-session-id"] = self._mcp_session_id
+
+            # Try at most twice: first attempt may return a session id we must echo back
+            max_attempts = 2
+            attempt = 0
+            while attempt < max_attempts:
+                response = await self._http_client.post(
+                    mcp_path,
+                    json=payload,
+                    headers=headers
+                )
+
+                if response.status_code == 200:
+                    content_type = response.headers.get("content-type", "")
+                    if "application/json" in content_type:
+                        result = response.json()
+                        logger.debug(f"DEBUG: Chamada HTTP bem sucedida: {result}")
+                        return result.get("result", result)
+                    if "text/event-stream" in content_type:
+                        # Return the raw stream text for now; parsing SSE can be added later
+                        stream_text = response.text
+                        logger.debug("DEBUG: Chamada HTTP retornou SSE stream")
+                        return {"stream": stream_text}
+
+                    # Unknown content type: return raw text
+                    raw_text = response.text
+                    logger.debug(f"DEBUG: Chamada HTTP retornou content-type={content_type}; returning raw text")
+                    return raw_text
+
+                # If server returned a session id header, retry with it
+                session_id = response.headers.get("mcp-session-id")
+                if session_id and "mcp-session-id" not in headers:
+                    logger.debug(f"DEBUG: Server requested mcp-session-id={session_id}; retrying once with this header")
+                    self._mcp_session_id = session_id
+                    headers["mcp-session-id"] = session_id
+                    attempt += 1
+                    continue
+
+                # Non-retriable failure; log and break to fallback
+                resp_text = response.text if hasattr(response, "text") else "<no response body>"
+                logger.error(f"DEBUG: Falha na chamada HTTP: status={response.status_code}, response='{resp_text}', url='{mcp_path}'")
+                break
+
+            # Fallback to direct call (no app) to avoid recursion
+            return await self.call_tool(tool_key, arguments, None)
+
         except Exception as e:
             logger.error(f"DEBUG: Erro na chamada HTTP: {e}")
             # Fallback to direct call
-            return await self.call_tool(tool_key, arguments, app)
+            return await self.call_tool(tool_key, arguments, None)
 
     async def call_tool(self, tool_key: str, arguments: dict[str, Any], app=None):
         """Execute a tool via the FastMCP router.
