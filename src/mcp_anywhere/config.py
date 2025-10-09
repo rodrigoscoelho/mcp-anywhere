@@ -116,3 +116,8 @@ class Config:
         "yes",
     )
 
+    # Admin bootstrap credentials
+    ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+    _admin_password = os.environ.get("ADMIN_PASSWORD")
+    ADMIN_PASSWORD = _admin_password if (_admin_password and _admin_password.strip()) else None
+

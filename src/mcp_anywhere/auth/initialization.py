@@ -32,24 +32,42 @@ async def create_default_admin_user(
         async with get_async_session() as session:
             return await create_default_admin_user(username, password, session)
 
+    normalized_password = password if password and password.strip() else None
+
     # Check if admin user already exists
     stmt = select(User).where(User.username == username)
     result = await db_session.execute(stmt)
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
-        logger.info(f"Admin user '{username}' already exists")
+        if normalized_password:
+            if existing_user.check_password(normalized_password):
+                logger.info(
+                    "Admin user '%s' already exists and matches configured credentials",
+                    username,
+                )
+            else:
+                existing_user.set_password(normalized_password)
+                db_session.add(existing_user)
+                await db_session.commit()
+                await db_session.refresh(existing_user)
+                logger.info(
+                    "Admin user '%s' password updated from environment configuration",
+                    username,
+                )
+        else:
+            logger.info(f"Admin user '{username}' already exists")
         return existing_user
 
     # Generate password if not provided
-    if not password:
-        password = secrets.token_urlsafe(16)
-        logger.warning(f"Generated random password for admin user: {password}")
+    if not normalized_password:
+        normalized_password = secrets.token_urlsafe(16)
+        logger.warning(f"Generated random password for admin user: {normalized_password}")
         logger.warning("Please change this password after first login!")
 
     # Create admin user
     admin_user = User(username=username)
-    admin_user.set_password(password)
+    admin_user.set_password(normalized_password)
 
     db_session.add(admin_user)
     await db_session.commit()
@@ -166,8 +184,8 @@ async def create_default_oauth_client(
 
 
 async def initialize_oauth_data(
-    admin_username: str = "admin",
-    admin_password: str = None,
+    admin_username: str | None = None,
+    admin_password: str | None = None,
     client_id: str = None,
     client_secret: str = None,
     redirect_uri: str = None,
@@ -184,6 +202,12 @@ async def initialize_oauth_data(
     Returns:
         Tuple of (admin_user, oauth_client)
     """
+    if admin_username is None:
+        admin_username = Config.ADMIN_USERNAME
+
+    if admin_password is None:
+        admin_password = Config.ADMIN_PASSWORD
+
     # Use Config.SERVER_URL for redirect_uri if not provided
     if redirect_uri is None:
         redirect_uri = f"{Config.SERVER_URL}/auth/callback"
