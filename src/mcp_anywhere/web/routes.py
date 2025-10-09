@@ -388,13 +388,14 @@ def _render_tool_test_result(
         tool=tool,
         tool_name=tool.tool_name if tool else tool_name,
         status=status,
+        http_status=status_code,
         **context,
     )
     return templates.TemplateResponse(
         request,
         "partials/tool_test_result.html",
         payload,
-        status_code=status_code,
+        status_code=200,
     )
 
 
@@ -520,6 +521,17 @@ def _candidate_tool_key_fragments(tool_key: str) -> set[str]:
         if "_" in prefix:
             fragments.add(f"{prefix.split('_', 1)[-1]}/{remainder}")
 
+    # Also allow suffix matches joined by underscores or dots
+    fragments.update({
+        fragment
+        for fragment in {
+            tool_key,
+            f"_{tool_key}",
+            f".{tool_key}",
+        }
+        if fragment
+    })
+
     return {frag for frag in fragments if frag}
 
 
@@ -564,8 +576,25 @@ async def _refresh_runtime_tool_registration(
             break
 
         if runtime_key and any(
-            runtime_key.endswith(f"/{frag}") for frag in fragments if "/" not in frag
+            runtime_key.endswith(pattern)
+            for pattern in (
+                f"/{frag}"
+                for frag in fragments
+                if "/" not in frag
+            )
         ):
+            selected_tool = runtime_tool
+            break
+
+        if runtime_key and (
+            runtime_key.endswith(f"_{tool.tool_name}")
+            or runtime_key.endswith(f".{tool.tool_name}")
+        ):
+            selected_tool = runtime_tool
+            break
+
+        base_runtime_key = runtime_key.split("/", 1)[-1] if runtime_key else None
+        if base_runtime_key and base_runtime_key in fragments:
             selected_tool = runtime_tool
             break
 
