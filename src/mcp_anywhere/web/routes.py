@@ -1309,7 +1309,9 @@ async def test_tool(request: Request) -> HTMLResponse:
 
         start = perf_counter()
         try:
-            tool_result = await mcp_manager.call_tool(tool.tool_name, arguments)
+            # Prefer to call the runtime-registered key if available (handles stored suffixes)
+            call_key = getattr(runtime_tool, "key", tool.tool_name) if runtime_tool is not None else tool.tool_name
+            tool_result = await mcp_manager.call_tool(call_key, arguments)
         except ToolError as exc:
             if tool_metadata_updated:
                 await db_session.commit()
