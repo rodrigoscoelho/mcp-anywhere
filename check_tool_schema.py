@@ -14,7 +14,7 @@ async def main():
     
     async with get_async_session() as session:
         # Find all tools
-        stmt = select(MCPServerTool).limit(50)
+        stmt = select(MCPServerTool)
         result = await session.execute(stmt)
         tools = result.scalars().all()
 
@@ -25,11 +25,11 @@ async def main():
             print(f"  - {tool.tool_name}")
         print("\n" + "="*80 + "\n")
 
-        # Now find context7 tools
-        context7_tools = [t for t in tools if 'context7' in t.tool_name.lower()]
-        print(f"Found {len(context7_tools)} context7 tools:\n")
+        # Now find library-docs and resolve tools
+        library_tools = [t for t in tools if 'library' in t.tool_name.lower() or 'resolve' in t.tool_name.lower()]
+        print(f"Found {len(library_tools)} library/resolve tools:\n")
 
-        for tool in context7_tools:
+        for tool in library_tools:
             print(f"Tool Name: {tool.tool_name}")
             print(f"Tool ID: {tool.id}")
             print(f"Server ID: {tool.server_id}")

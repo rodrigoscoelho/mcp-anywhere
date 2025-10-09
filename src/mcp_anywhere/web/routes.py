@@ -1329,8 +1329,16 @@ async def test_tool(request: Request) -> HTMLResponse:
             tool_metadata_updated = True
 
         form_data = await request.form()
+        logger.debug(
+            "DEBUG: test_tool - form_data recebido: %s",
+            dict(form_data)
+        )
         arguments, validation_errors = _parse_tool_form_data(
             form_data, form_fields, use_raw_json
+        )
+        logger.debug(
+            "DEBUG: test_tool - arguments parseados: %s, validation_errors: %s",
+            arguments, validation_errors
         )
 
         if validation_errors:
