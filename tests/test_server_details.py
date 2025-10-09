@@ -6,6 +6,7 @@ from fastmcp.exceptions import NotFoundError
 
 from mcp_anywhere.auth.models import User
 from mcp_anywhere.database import MCPServer, MCPServerTool, get_async_session
+from mcp_anywhere.core.mcp_manager import MCPManager
 
 
 class _TimeoutManager:
@@ -133,8 +134,9 @@ async def test_server_detail_uses_cached_schema_on_timeout(app, client):
 @pytest.mark.asyncio
 async def test_server_detail_resyncs_tool_key(app, client):
     async with get_async_session() as session:
+        suffix = uuid.uuid4().hex[:6]
         server = MCPServer(
-            name="Renamed Server",
+            name=f"Renamed Server {suffix}",
             github_url="https://example.com/repo.git",
             runtime_type="docker",
             install_command="pip install -r requirements.txt",
@@ -168,7 +170,8 @@ async def test_server_detail_resyncs_tool_key(app, client):
     )
     assert login_response.status_code == 302
 
-    new_key = "Renamed_Server.tool/foo"
+    prefix = MCPManager._format_prefix(server.name, server.id)
+    new_key = f"{prefix}.tool/foo"
     runtime_tool = _RuntimeToolStub(new_key)
     app.state.mcp_manager = _RenamedToolManager(server_id, runtime_tool, stale_key)
 
@@ -186,8 +189,9 @@ async def test_server_detail_resyncs_tool_key(app, client):
 @pytest.mark.asyncio
 async def test_tool_route_resyncs_tool_key(app, client):
     async with get_async_session() as session:
+        suffix = uuid.uuid4().hex[:6]
         server = MCPServer(
-            name="Resync Runner",
+            name=f"Resync Runner {suffix}",
             github_url="https://example.com/repo.git",
             runtime_type="docker",
             install_command="pip install -r requirements.txt",
@@ -221,7 +225,8 @@ async def test_tool_route_resyncs_tool_key(app, client):
     )
     assert login_response.status_code == 302
 
-    new_key = "Resync_Runner.tool/runner"
+    prefix = MCPManager._format_prefix(server.name, server.id)
+    new_key = f"{prefix}.tool/runner"
     runtime_tool = _RuntimeToolStub(new_key, description="Runner tool")
     app.state.mcp_manager = _RenamedToolManager(server_id, runtime_tool, stale_key)
 
