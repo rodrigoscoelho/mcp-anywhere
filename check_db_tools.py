@@ -9,15 +9,15 @@ cursor = conn.cursor()
 
 # Query the tools for context7 server
 cursor.execute("""
-    SELECT server_id, tool_name 
-    FROM mcp_server_tools 
+    SELECT id, server_id, tool_name
+    FROM mcp_server_tools
     WHERE server_id = '6c335d0d'
 """)
 
 results = cursor.fetchall()
 print("Tools in database for context7 server:")
 for row in results:
-    print(f"  Server ID: {row[0]}, Tool Name: {row[1]}")
+    print(f"  ID: {row[0]}, Server ID: {row[1]}, Tool Name: {row[2]}")
 
 conn.close()
 

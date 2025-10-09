@@ -12,7 +12,7 @@ async def main():
 
     # Server ID and Tool ID from the database check
     server_id = "6c335d0d"  # context7
-    tool_id = "d75bdc73"    # resolve-library-id
+    tool_id = "0d7233cf"    # context7_resolve-library-id
 
     # Create a cookie jar to persist cookies
     cookies = httpx.Cookies()
