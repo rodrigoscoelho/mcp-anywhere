@@ -367,7 +367,7 @@ class MCPManager:
             response = await self._http_client.post(
                 mcp_path,
                 json=payload,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
             )
             
             if response.status_code == 200:
