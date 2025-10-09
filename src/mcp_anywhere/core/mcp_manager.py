@@ -334,5 +334,29 @@ class MCPManager:
 
     async def call_tool(self, tool_key: str, arguments: dict[str, Any]):
         """Execute a tool via the FastMCP router."""
+        
+        logger.debug(
+            "DEBUG: call_tool chamado diretamente - tool_key=%s, arguments=%s",
+            tool_key, arguments
+        )
+        logger.debug(
+            "DEBUG: Verificando contexto FastMCP - router=%s, _tool_manager=%s",
+            type(self.router),
+            hasattr(self.router, '_tool_manager')
+        )
+        
+        try:
+            # Tentar verificar se há contexto disponível
+            from fastmcp.server.dependencies import get_context
+            context = get_context()
+            logger.debug("DEBUG: Contexto FastMCP encontrado: %s", context)
+        except RuntimeError as ctx_err:
+            logger.warning(
+                "DEBUG: Contexto FastMCP não disponível: %s. "
+                "Esta chamada direta pode falhar se precisar de contexto.",
+                ctx_err
+            )
+        except Exception as e:
+            logger.debug("DEBUG: Erro ao verificar contexto: %s", e)
 
         return await self.router._tool_manager.call_tool(tool_key, arguments)

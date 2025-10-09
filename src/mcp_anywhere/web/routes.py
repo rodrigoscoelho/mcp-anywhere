@@ -1341,6 +1341,15 @@ async def test_tool(request: Request) -> HTMLResponse:
         try:
             # Prefer to call the runtime-registered key if available (handles stored suffixes)
             call_key = getattr(runtime_tool, "key", tool.tool_name) if runtime_tool is not None else tool.tool_name
+            logger.debug(
+                "DEBUG: test_tool - tentando executar ferramenta. call_key=%s, tool_name=%s, arguments=%s",
+                call_key, tool.tool_name, arguments
+            )
+            logger.debug(
+                "DEBUG: test_tool - runtime_tool=%s, mcp_manager=%s",
+                type(runtime_tool) if runtime_tool else None,
+                type(mcp_manager)
+            )
             try:
                 tool_result = await mcp_manager.call_tool(call_key, arguments)
             except NotFoundError:
