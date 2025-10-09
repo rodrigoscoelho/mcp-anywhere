@@ -476,6 +476,9 @@ class MCPManager:
             try:
                 logger.debug("DEBUG: Executando ferramenta via HTTP (recomendado)")
                 return await self.call_tool_via_http(tool_key, arguments, app)
+            except ToolError:
+                # Re-raise ToolError - this is a legitimate tool error, not a communication error
+                raise
             except Exception as http_exc:
                 logger.warning(f"DEBUG: Falha na chamada HTTP: {http_exc}. Tentando fallback direto.")
 
