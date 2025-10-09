@@ -10,24 +10,50 @@ import tempfile
 from collections.abc import AsyncGenerator
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.applications import Starlette
 
 from mcp_anywhere.base import Base
 from mcp_anywhere.web.app import create_app
+import mcp_anywhere.database as database_module
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_test_database():
+    """Cleanup test database after all tests complete."""
+    yield
+
+    # Remove test database file if it exists
+    test_db_path = "/tmp/test_mcp_anywhere.db"
+    if os.path.exists(test_db_path):
+        os.unlink(test_db_path)
 
 
 @pytest_asyncio.fixture(scope="function")
-async def app() -> Starlette:
+async def app() -> AsyncGenerator[Starlette, None]:
     """
     Creates a Starlette app instance for each test.
     Defaults to HTTP mode for backward compatibility with existing tests.
 
-    Returns:
+    Uses a temporary database for each test to avoid polluting production data.
+    The DATABASE_URL is set by pytest-env in pyproject.toml.
+
+    Yields:
         Starlette: The configured application instance
     """
-    return await create_app(transport_mode="http")
+    # Close existing database connection if any (singleton cleanup)
+    # This ensures each test gets a fresh database connection
+    await database_module.db_manager.close()
+
+    try:
+        # Create app (this will initialize db_manager with the test database)
+        app = await create_app(transport_mode="http")
+        yield app
+    finally:
+        # Close test database
+        await database_module.db_manager.close()
 
 
 @pytest_asyncio.fixture(scope="function")
