@@ -243,38 +243,26 @@ class MCPManager:
             return []
 
         try:
-            # Get the prefix used for this server
-            server_name = self.mounted_server_names.get(server_id, "")
-            prefix = self._format_prefix(server_name, server_id)
-
-            logger.debug(f"DEBUG: _discover_server_tools - server_id={server_id}, server_name={server_name}, prefix={prefix}")
-
-            # Get all tools from the router (which includes prefixes)
-            all_tools = await asyncio.wait_for(
-                self.router._tool_manager.get_tools(),
+            tools = await asyncio.wait_for(
+                self.mounted_servers[server_id]._tool_manager.get_tools(),
                 timeout=DISCOVERY_TIMEOUT_SECONDS,
             )
 
-            logger.debug(f"DEBUG: _discover_server_tools - total tools in router: {len(all_tools)}")
-            logger.debug(f"DEBUG: _discover_server_tools - first 5 tool keys: {list(all_tools.keys())[:5]}")
-
-            # Filter tools that belong to this server (start with the prefix)
+            # Convert tools to the format expected by the database
+            # Store WITHOUT prefix - FastMCP handles prefixing internally
             discovered_tools = []
-            for key, tool in all_tools.items():
-                # Check if this tool belongs to this server
-                if key.startswith(f"{prefix}_"):
-                    logger.debug(f"DEBUG: _discover_server_tools - matched tool: {key}")
-                    schema = getattr(tool, "parameters", None)
-                    if not isinstance(schema, dict):
-                        schema = None
+            for key, tool in tools.items():
+                schema = getattr(tool, "parameters", None)
+                if not isinstance(schema, dict):
+                    schema = None
 
-                    discovered_tools.append(
-                        {
-                            "name": key,  # Keep the full name with prefix
-                            "description": tool.description or "",
-                            "schema": schema,
-                        }
-                    )
+                discovered_tools.append(
+                    {
+                        "name": key,  # Store without prefix
+                        "description": tool.description or "",
+                        "schema": schema,
+                    }
+                )
 
             logger.info(
                 f"Discovered {len(discovered_tools)} tools for server '{server_id}'"

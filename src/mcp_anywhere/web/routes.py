@@ -1356,16 +1356,26 @@ async def test_tool(request: Request) -> HTMLResponse:
 
         start = perf_counter()
         try:
-            # Prefer to call the runtime-registered key if available (handles stored suffixes)
-            call_key = getattr(runtime_tool, "key", tool.tool_name) if runtime_tool is not None else tool.tool_name
+            # Build the full tool name with server prefix (e.g., "context7_resolve-library-id")
+            # FastMCP mounts servers with prefixes, so we need to use the prefixed name
+            import re
+            server_name_sanitized = re.sub(r"\s+", "_", server.name.strip())
+            server_name_sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", server_name_sanitized)
+            server_name_sanitized = server_name_sanitized.strip("_.")
+            prefix = server_name_sanitized or server.id
+
+            # The tool name in DB is without prefix, but runtime expects it with prefix
+            call_key = f"{prefix}_{tool.tool_name}"
+
             logger.debug(
                 "DEBUG: test_tool - tentando executar ferramenta. call_key=%s, tool_name=%s, arguments=%s",
                 call_key, tool.tool_name, arguments
             )
             logger.debug(
-                "DEBUG: test_tool - runtime_tool=%s, mcp_manager=%s",
+                "DEBUG: test_tool - runtime_tool=%s, mcp_manager=%s, prefix=%s",
                 type(runtime_tool) if runtime_tool else None,
-                type(mcp_manager)
+                type(mcp_manager),
+                prefix
             )
             try:
                 # Passar o app para fazer requisição HTTP interna ao FastMCP
