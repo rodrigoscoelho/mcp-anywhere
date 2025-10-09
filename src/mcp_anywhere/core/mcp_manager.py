@@ -381,46 +381,44 @@ class MCPManager:
             else:
                 logger.error("DEBUG: Falha na chamada HTTP: %d - %s", response.status_code, response.text)
                 # Fallback to direct call
-                return await self.call_tool(tool_key, arguments)
+                return await self.call_tool(tool_key, arguments, app)
                 
         except Exception as e:
             logger.error("DEBUG: Erro na chamada HTTP: %s", e)
             # Fallback to direct call
-            return await self.call_tool(tool_key, arguments)
+            return await self.call_tool(tool_key, arguments, app)
 
     async def call_tool(self, tool_key: str, arguments: dict[str, Any], app=None):
         """Execute a tool via the FastMCP router.
 
-        If `app` (Starlette/ASGI app) is provided, prefer executing the tool via an
-        internal HTTP call to ensure the FastMCP context is established for the call.
-        Otherwise attempt to use the active FastMCP context; if that is not present
-        fall back to a direct call on the router's tool manager.
+        Always tries to execute via HTTP request to the FastMCP endpoint when app is provided,
+        as this ensures proper context establishment. Falls back to direct calls if HTTP fails.
         """
         logger.debug(
             "DEBUG: call_tool chamado - tool_key=%s, arguments=%s, app_provided=%s",
             tool_key, arguments, bool(app)
         )
 
-        # If the caller explicitly provided the Starlette app, try the HTTP path first
+        # Always try HTTP path first when app is available (recommended approach)
         if app is not None:
             try:
-                logger.debug("DEBUG: Chamando ferramenta via HTTP usando app fornecido")
+                logger.debug("DEBUG: Executando ferramenta via HTTP (recomendado)")
                 return await self.call_tool_via_http(tool_key, arguments, app)
             except Exception as http_exc:
-                logger.warning("DEBUG: Falha na chamada HTTP com app fornecido: %s. Tentando fallback direto.", http_exc)
+                logger.warning("DEBUG: Falha na chamada HTTP: %s. Tentando fallback direto.", http_exc)
 
-        # Otherwise, try to use the FastMCP context if available and call directly
+        # Fallback: try to use the FastMCP context if available
         try:
             from fastmcp.server.dependencies import get_context
             context = get_context()
-            logger.debug("DEBUG: Contexto FastMCP encontrado: %s", context)
+            logger.debug("DEBUG: Contexto FastMCP encontrado, executando diretamente")
             return await self.router._tool_manager.call_tool(tool_key, arguments)
         except RuntimeError as ctx_err:
             logger.warning(
-                "DEBUG: Contexto FastMCP não disponível: %s. Tentando fallback direto.",
+                "DEBUG: Contexto FastMCP não disponível: %s. Tentando chamada direta sem contexto.",
                 ctx_err
             )
-            # Context not available; fall back to direct call (best-effort)
+            # Context not available; try direct call as last resort
             try:
                 return await self.router._tool_manager.call_tool(tool_key, arguments)
             except Exception as direct_err:

@@ -1351,7 +1351,8 @@ async def test_tool(request: Request) -> HTMLResponse:
                 type(mcp_manager)
             )
             try:
-                tool_result = await mcp_manager.call_tool(call_key, arguments)
+                # Passar o app para fazer requisição HTTP interna ao FastMCP
+                tool_result = await mcp_manager.call_tool(call_key, arguments, request.app)
             except NotFoundError:
                 # The router reports the key missing; attempt to resolve by enumerating runtime tools
                 try:
@@ -1395,7 +1396,7 @@ async def test_tool(request: Request) -> HTMLResponse:
                         # Best-effort update; continue even if DB commit fails
                         pass
 
-                    tool_result = await mcp_manager.call_tool(matched_key, arguments)
+                    tool_result = await mcp_manager.call_tool(matched_key, arguments, request.app)
                 else:
                     # No matching runtime key found: log and show runtime keys to help debugging
                     available = list(runtime_tools.keys())
