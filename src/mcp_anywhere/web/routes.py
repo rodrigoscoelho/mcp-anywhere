@@ -1311,7 +1311,67 @@ async def test_tool(request: Request) -> HTMLResponse:
         try:
             # Prefer to call the runtime-registered key if available (handles stored suffixes)
             call_key = getattr(runtime_tool, "key", tool.tool_name) if runtime_tool is not None else tool.tool_name
-            tool_result = await mcp_manager.call_tool(call_key, arguments)
+            try:
+                tool_result = await mcp_manager.call_tool(call_key, arguments)
+            except NotFoundError:
+                # The router reports the key missing; attempt to resolve by enumerating runtime tools
+                try:
+                    runtime_tools = await mcp_manager.router._tool_manager.get_tools()
+                except Exception:
+                    # Re-raise original NotFoundError if we cannot query runtime tools
+                    raise
+
+                fragments = _candidate_tool_key_fragments(tool.tool_name)
+                matched_key = None
+                for runtime_key in runtime_tools.keys():
+                    if runtime_key == tool.tool_name:
+                        matched_key = runtime_key
+                        break
+                    if runtime_key in fragments:
+                        matched_key = runtime_key
+                        break
+                    if any(runtime_key.endswith(f"/{frag}") for frag in fragments if "/" not in frag):
+                        matched_key = runtime_key
+                        break
+
+                if matched_key:
+                    # Update stored tool key to the resolved runtime key so subsequent calls succeed
+                    try:
+                        tool.tool_name = matched_key
+                        db_session.add(tool)
+                        tool_metadata_updated = True
+                        await db_session.commit()
+                    except Exception:
+                        # Best-effort update; continue even if DB commit fails
+                        pass
+
+                    tool_result = await mcp_manager.call_tool(matched_key, arguments)
+                else:
+                    # No matching runtime key found: log and show runtime keys to help debugging
+                    available = list(runtime_tools.keys())
+                    logger.debug(
+                        "Tool %s not found when calling key %s. Runtime keys: %s; fragments: %s",
+                        tool.tool_name,
+                        call_key,
+                        available,
+                        fragments,
+                    )
+                    return _render_tool_test_result(
+                        request,
+                        tool=tool,
+                        tool_name=tool.tool_name,
+                        status="error",
+                        status_code=404,
+                        error_message=(
+                            "Ferramenta não encontrada no runtime atual. "
+                            "Chaves disponíveis: %s. Refaça o build do servidor se necessário."
+                            % (", ".join(available) if available else "(nenhuma)")
+                        ),
+                        error_details=(
+                            "Tente sincronizar as chaves do runtime ou verifique o prefixo usado ao montar o servidor."
+                        ),
+                    )
+
         except ToolError as exc:
             if tool_metadata_updated:
                 await db_session.commit()
