@@ -130,6 +130,7 @@ class MCPManager:
         self.router = router
         self.mounted_servers: dict[str, FastMCP] = {}
         self.mounted_server_names: dict[str, str] = {}
+        self._http_client = None  # Cache HTTP client for internal calls
         logger.info("Initialized MCPManager")
 
     @staticmethod
@@ -332,6 +333,61 @@ class MCPManager:
                 )
             ) from exc
 
+    async def call_tool_via_http(self, tool_key: str, arguments: dict[str, Any], app):
+        """Execute a tool via HTTP request to FastMCP app to ensure context is established.
+        
+        Args:
+            tool_key: The tool key to execute
+            arguments: Tool arguments
+            app: The Starlette app containing the FastMCP HTTP app
+            
+        Returns:
+            Tool execution result
+        """
+        
+        logger.debug("DEBUG: Executando ferramenta via HTTP para garantir contexto: %s", tool_key)
+        
+        # Create HTTP client with ASGI transport
+        if self._http_client is None:
+            from httpx import ASGITransport, AsyncClient
+            self._http_client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        
+        # Make HTTP request to FastMCP endpoint
+        try:
+            # FastMCP HTTP API endpoint for tool calls
+            mcp_path = "/mcp/"  # FastMCP mounts at /mcp/ path
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": tool_key,
+                    "arguments": arguments
+                }
+            }
+            
+            logger.debug("DEBUG: Fazendo requisição HTTP para %s com payload: %s", mcp_path, payload)
+            
+            response = await self._http_client.post(
+                mcp_path,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.debug("DEBUG: Chamada HTTP bem sucedida: %s", result)
+                return result.get("result", result)
+            else:
+                logger.error("DEBUG: Falha na chamada HTTP: %d - %s", response.status_code, response.text)
+                # Fallback to direct call
+                return await self.call_tool(tool_key, arguments)
+                
+        except Exception as e:
+            logger.error("DEBUG: Erro na chamada HTTP: %s", e)
+            # Fallback to direct call
+            return await self.call_tool(tool_key, arguments)
+
     async def call_tool(self, tool_key: str, arguments: dict[str, Any]):
         """Execute a tool via the FastMCP router."""
         
@@ -350,13 +406,30 @@ class MCPManager:
             from fastmcp.server.dependencies import get_context
             context = get_context()
             logger.debug("DEBUG: Contexto FastMCP encontrado: %s", context)
+            # Se há contexto, pode chamar diretamente
+            return await self.router._tool_manager.call_tool(tool_key, arguments)
         except RuntimeError as ctx_err:
             logger.warning(
                 "DEBUG: Contexto FastMCP não disponível: %s. "
                 "Esta chamada direta pode falhar se precisar de contexto.",
                 ctx_err
             )
+            # Se não há contexto, tentar chamada HTTP
+            try:
+                # Não podemos fazer chamada HTTP sem o app aqui, então fallback direto
+                logger.warning("DEBUG: Contexto não disponível e app não fornecido, tentando chamada direta")
+                return await self.router._tool_manager.call_tool(tool_key, arguments)
+            except Exception as http_err:
+                logger.error("DEBUG: Falha na chamada direta: %s", http_err)
+                # Último recurso: tentar chamada direta mesmo sem contexto
+                return await self.router._tool_manager.call_tool(tool_key, arguments)
         except Exception as e:
             logger.debug("DEBUG: Erro ao verificar contexto: %s", e)
-
-        return await self.router._tool_manager.call_tool(tool_key, arguments)
+            # Tentar chamada HTTP em caso de outros erros
+            try:
+                # Não podemos fazer chamada HTTP sem o app aqui, então fallback direto
+                logger.warning("DEBUG: Erro ao verificar contexto e app não fornecido, tentando chamada direta")
+                return await self.router._tool_manager.call_tool(tool_key, arguments)
+            except Exception:
+                # Fallback para chamada direta
+                return await self.router._tool_manager.call_tool(tool_key, arguments)
