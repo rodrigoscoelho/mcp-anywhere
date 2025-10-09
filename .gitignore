@@ -178,7 +178,6 @@ data/
 .vscode/
 archive/
 engineering_plan.md
-claude.md
 mcp_simple_auth/
 vendor/
 /.env
