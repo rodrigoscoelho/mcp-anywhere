@@ -295,7 +295,7 @@ def _parse_tool_form_data(
     errors: dict[str, str] = {}
 
     if use_raw_json:
-        raw_payload = (form.get("__raw_payload") or "").strip()
+        raw_payload = (_as_optional_str(form.get("__raw_payload")) or "").strip()
         if not raw_payload:
             errors["__raw_payload"] = "Informe um objeto JSON com os argumentos da ferramenta."
             return {}, errors
@@ -322,7 +322,7 @@ def _parse_tool_form_data(
             continue
 
         if widget == "json":
-            text_value = (raw_value or "").strip()
+            text_value = (_as_optional_str(raw_value) or "").strip()
             if not text_value:
                 if field.get("required"):
                     errors[name] = "Este campo é obrigatório."
@@ -334,7 +334,7 @@ def _parse_tool_form_data(
             continue
 
         if widget == "number":
-            text_value = (raw_value or "").strip()
+            text_value = (_as_optional_str(raw_value) or "").strip()
             if not text_value:
                 if field.get("required"):
                     errors[name] = "Este campo é obrigatório."
@@ -349,7 +349,7 @@ def _parse_tool_form_data(
             continue
 
         if widget == "select":
-            text_value = (raw_value or "").strip()
+            text_value = (_as_optional_str(raw_value) or "").strip()
             if not text_value:
                 if field.get("required"):
                     errors[name] = "Este campo é obrigatório."
@@ -362,7 +362,7 @@ def _parse_tool_form_data(
             continue
 
         # Default: treat as simple text input
-        text_value = (raw_value or "").strip()
+        text_value = (_as_optional_str(raw_value) or "").strip()
         if not text_value:
             if field.get("required"):
                 errors[name] = "Este campo é obrigatório."
