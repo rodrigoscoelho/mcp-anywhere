@@ -587,7 +587,8 @@ async def _refresh_runtime_tool_registration(
             break
 
         if runtime_key and (
-            runtime_key.endswith(f"_{tool.tool_name}")
+            runtime_key.endswith(tool.tool_name)
+            or runtime_key.endswith(f"_{tool.tool_name}")
             or runtime_key.endswith(f".{tool.tool_name}")
         ):
             selected_tool = runtime_tool
@@ -1360,6 +1361,17 @@ async def test_tool(request: Request) -> HTMLResponse:
                         matched_key = runtime_key
                         break
                     if any(runtime_key.endswith(f"/{frag}") for frag in fragments if "/" not in frag):
+                        matched_key = runtime_key
+                        break
+                    if runtime_key and (
+                        runtime_key.endswith(tool.tool_name)
+                        or runtime_key.endswith(f"_{tool.tool_name}")
+                        or runtime_key.endswith(f".{tool.tool_name}")
+                    ):
+                        matched_key = runtime_key
+                        break
+                    suffix = runtime_key.split("/", 1)[-1] if runtime_key else None
+                    if suffix and suffix in fragments:
                         matched_key = runtime_key
                         break
 
