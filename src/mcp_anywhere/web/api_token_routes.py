@@ -1,4 +1,5 @@
-"""Routes for managing API tokens via the admin UI."""
+"""Routes for managing API tokens via the admin UI.
+"""
 
 from __future__ import annotations
 
@@ -9,16 +10,23 @@ from starlette.templating import Jinja2Templates
 
 from mcp_anywhere.auth.api_tokens import APITokenService
 from mcp_anywhere.logging_config import get_logger
+from mcp_anywhere.web.routes import get_template_context
 
 logger = get_logger(__name__)
+# Templates directory follows the same pattern used across the project
 templates = Jinja2Templates(directory="src/mcp_anywhere/web/templates")
 
 
 async def _require_authenticated(request: Request) -> bool:
+    """Return True when a user_id exists in session (same behaviour as other routes)."""
     return bool(request.session.get("user_id"))
 
 
 async def api_tokens_get(request: Request) -> Response:
+    """Render API Tokens page with full template context so header/menu stays consistent.
+
+    Uses get_template_context(...) to include current_user and transport_mode like other pages.
+    """
     if not await _require_authenticated(request):
         login_url = f"/auth/login?next={request.url}"
         return RedirectResponse(url=login_url, status_code=302)
@@ -36,14 +44,15 @@ async def api_tokens_get(request: Request) -> Response:
 
     message = request.query_params.get("message")
 
-    context = {
-        "request": request,
-        "tokens": tokens,
-        "new_token_value": new_token_value,
-        "new_token_name": new_token_name,
-        "message": message,
-    }
-    return templates.TemplateResponse("settings/api_tokens.html", context)
+    context = get_template_context(
+        request,
+        tokens=tokens,
+        new_token_value=new_token_value,
+        new_token_name=new_token_name,
+        message=message,
+    )
+
+    return templates.TemplateResponse(request, "settings/api_tokens.html", context)
 
 
 async def api_tokens_post(request: Request) -> Response:
@@ -68,9 +77,7 @@ async def api_tokens_post(request: Request) -> Response:
         user_id_obj = request.session.get("user_id")
         if not isinstance(user_id_obj, int):
             logger.warning("API token creation attempted without numeric user id")
-            return RedirectResponse(
-                url="/settings/api-keys?message=invalid", status_code=302
-            )
+            return RedirectResponse(url="/settings/api-keys?message=invalid", status_code=302)
 
         issued = await service.issue_token(name=name, created_by=user_id_obj)
         request.session["new_api_token"] = issued.token
@@ -83,9 +90,7 @@ async def api_tokens_post(request: Request) -> Response:
         try:
             token_id = int(token_id_raw)
         except (TypeError, ValueError):
-            return RedirectResponse(
-                url="/settings/api-keys?message=invalid", status_code=302
-            )
+            return RedirectResponse(url="/settings/api-keys?message=invalid", status_code=302)
 
         success = await service.revoke_token(token_id)
         logger.info("API token revoked: %s (success=%s)", token_id, success)
