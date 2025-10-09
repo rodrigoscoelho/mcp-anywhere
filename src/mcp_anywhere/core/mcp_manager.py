@@ -388,48 +388,49 @@ class MCPManager:
             # Fallback to direct call
             return await self.call_tool(tool_key, arguments)
 
-    async def call_tool(self, tool_key: str, arguments: dict[str, Any]):
-        """Execute a tool via the FastMCP router."""
-        
+    async def call_tool(self, tool_key: str, arguments: dict[str, Any], app=None):
+        """Execute a tool via the FastMCP router.
+
+        If `app` (Starlette/ASGI app) is provided, prefer executing the tool via an
+        internal HTTP call to ensure the FastMCP context is established for the call.
+        Otherwise attempt to use the active FastMCP context; if that is not present
+        fall back to a direct call on the router's tool manager.
+        """
         logger.debug(
-            "DEBUG: call_tool chamado diretamente - tool_key=%s, arguments=%s",
-            tool_key, arguments
+            "DEBUG: call_tool chamado - tool_key=%s, arguments=%s, app_provided=%s",
+            tool_key, arguments, bool(app)
         )
-        logger.debug(
-            "DEBUG: Verificando contexto FastMCP - router=%s, _tool_manager=%s",
-            type(self.router),
-            hasattr(self.router, '_tool_manager')
-        )
-        
+
+        # If the caller explicitly provided the Starlette app, try the HTTP path first
+        if app is not None:
+            try:
+                logger.debug("DEBUG: Chamando ferramenta via HTTP usando app fornecido")
+                return await self.call_tool_via_http(tool_key, arguments, app)
+            except Exception as http_exc:
+                logger.warning("DEBUG: Falha na chamada HTTP com app fornecido: %s. Tentando fallback direto.", http_exc)
+
+        # Otherwise, try to use the FastMCP context if available and call directly
         try:
-            # Tentar verificar se há contexto disponível
             from fastmcp.server.dependencies import get_context
             context = get_context()
             logger.debug("DEBUG: Contexto FastMCP encontrado: %s", context)
-            # Se há contexto, pode chamar diretamente
             return await self.router._tool_manager.call_tool(tool_key, arguments)
         except RuntimeError as ctx_err:
             logger.warning(
-                "DEBUG: Contexto FastMCP não disponível: %s. "
-                "Esta chamada direta pode falhar se precisar de contexto.",
+                "DEBUG: Contexto FastMCP não disponível: %s. Tentando fallback direto.",
                 ctx_err
             )
-            # Se não há contexto, tentar chamada HTTP
+            # Context not available; fall back to direct call (best-effort)
             try:
-                # Não podemos fazer chamada HTTP sem o app aqui, então fallback direto
-                logger.warning("DEBUG: Contexto não disponível e app não fornecido, tentando chamada direta")
                 return await self.router._tool_manager.call_tool(tool_key, arguments)
-            except Exception as http_err:
-                logger.error("DEBUG: Falha na chamada direta: %s", http_err)
-                # Último recurso: tentar chamada direta mesmo sem contexto
-                return await self.router._tool_manager.call_tool(tool_key, arguments)
+            except Exception as direct_err:
+                logger.error("DEBUG: Falha na chamada direta ao tool_manager: %s", direct_err)
+                raise
         except Exception as e:
-            logger.debug("DEBUG: Erro ao verificar contexto: %s", e)
-            # Tentar chamada HTTP em caso de outros erros
+            logger.debug("DEBUG: Erro inesperado ao verificar contexto: %s", e)
+            # Final fallback: direct call to the tool manager
             try:
-                # Não podemos fazer chamada HTTP sem o app aqui, então fallback direto
-                logger.warning("DEBUG: Erro ao verificar contexto e app não fornecido, tentando chamada direta")
                 return await self.router._tool_manager.call_tool(tool_key, arguments)
-            except Exception:
-                # Fallback para chamada direta
-                return await self.router._tool_manager.call_tool(tool_key, arguments)
+            except Exception as direct_err:
+                logger.error("DEBUG: Falha na chamada direta ao tool_manager (final): %s", direct_err)
+                raise

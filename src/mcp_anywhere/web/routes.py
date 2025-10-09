@@ -1351,8 +1351,7 @@ async def test_tool(request: Request) -> HTMLResponse:
                 type(mcp_manager)
             )
             try:
-                # Passar o app da requisição para garantir contexto FastMCP
-                tool_result = await mcp_manager.call_tool(call_key, arguments, request.app)
+                tool_result = await mcp_manager.call_tool(call_key, arguments)
             except NotFoundError:
                 # The router reports the key missing; attempt to resolve by enumerating runtime tools
                 try:
