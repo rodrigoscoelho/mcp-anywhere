@@ -455,6 +455,9 @@ class MCPManager:
             # Fallback to direct call (no app) to avoid recursion
             return await self.call_tool(tool_key, arguments, None)
 
+        except ToolError:
+            # Re-raise ToolError - this is a legitimate tool error, not a communication error
+            raise
         except Exception as e:
             logger.error(f"DEBUG: Erro na chamada HTTP: {e}")
             # Fallback to direct call
