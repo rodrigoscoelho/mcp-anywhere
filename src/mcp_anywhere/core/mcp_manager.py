@@ -341,7 +341,7 @@ class MCPManager:
             Tool execution result
         """
         
-        logger.debug("DEBUG: Executando ferramenta via HTTP para garantir contexto: {}", tool_key)
+        logger.debug(f"DEBUG: Executando ferramenta via HTTP para garantir contexto: {tool_key}")
         
         # Create HTTP client with ASGI transport
         if self._http_client is None:
