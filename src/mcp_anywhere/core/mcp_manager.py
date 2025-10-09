@@ -379,7 +379,10 @@ class MCPManager:
                 logger.debug("DEBUG: Chamada HTTP bem sucedida: %s", result)
                 return result.get("result", result)
             else:
-                logger.error("DEBUG: Falha na chamada HTTP: %d - %s", response.status_code, response.text)
+                logger.error(
+                    "DEBUG: Falha na chamada HTTP: status=%d, response='%s', url='%s'",
+                    response.status_code, response.text, mcp_path
+                )
                 # Fallback to direct call
                 return await self.call_tool(tool_key, arguments, app)
                 
