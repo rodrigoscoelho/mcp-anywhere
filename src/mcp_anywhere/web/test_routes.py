@@ -16,6 +16,7 @@ from mcp_anywhere.config import Config
 from mcp_anywhere.database import MCPServer, get_async_session
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.web.routes import get_template_context
+from mcp_anywhere.core.mcp_manager import MCPManager
 
 logger = get_logger(__name__)
 templates = Jinja2Templates(directory="src/mcp_anywhere/web/templates")
@@ -186,12 +187,15 @@ async def execute_tool(request: Request) -> JSONResponse:
         mcp_url = f"{scheme}://{host}:{port}{Config.MCP_PATH_MOUNT}/"
 
         logger.info(f"Making internal MCP request to: {mcp_url}")
-        logger.info(f"Tool name: {server_id}_{tool_name}")
+        logger.info(f"Requested server/tool: {server_id}/{tool_name}")
         logger.info(f"Arguments: {arguments}")
 
         # The tool name should include the server prefix
-        # Format: {server_id}_{tool_name}
-        prefixed_tool_name = f"{server_id}_{tool_name}"
+        # Format: {prefix}_{tool_name} where prefix is derived from server name
+        prefix = MCPManager._format_prefix(server.name, server.id)
+        prefixed_tool_name = f"{prefix}_{tool_name}"
+        logger.info(f"Derived MCP prefix: {prefix} (from server '{server.name}')")
+        logger.info(f"Final tool name: {prefixed_tool_name}")
 
         # Create JSON-RPC 2.0 request for tools/call
         # This is the standard MCP protocol format used by all MCP clients
