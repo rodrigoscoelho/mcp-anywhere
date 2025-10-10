@@ -173,32 +173,20 @@ async def execute_tool(request: Request) -> JSONResponse:
                 )
 
         # Build the MCP endpoint URL
-        # Since we're behind a proxy, we should make the request to localhost
-        # but use the internal port where uvicorn is running
-
-        # For internal requests, always use localhost and the actual server port
-        # This avoids going through the proxy
         host = "127.0.0.1"
         port = 8000  # Default uvicorn port
         scheme = "http"  # Internal requests use HTTP
-
-        # Build the full MCP URL
-        # Use MCP_PATH_MOUNT (without trailing slash) + "/" for the JSON-RPC endpoint
         mcp_url = f"{scheme}://{host}:{port}{Config.MCP_PATH_MOUNT}/"
 
         logger.info(f"Making internal MCP request to: {mcp_url}")
         logger.info(f"Requested server/tool: {server_id}/{tool_name}")
         logger.info(f"Arguments: {arguments}")
 
-        # The tool name should include the server prefix
-        # Format: {prefix}_{tool_name} where prefix is derived from server name
         prefix = MCPManager._format_prefix(server.name, server.id)
         prefixed_tool_name = f"{prefix}_{tool_name}"
         logger.info(f"Derived MCP prefix: {prefix} (from server '{server.name}')")
         logger.info(f"Final tool name: {prefixed_tool_name}")
 
-        # Create JSON-RPC 2.0 request for tools/call
-        # This is the standard MCP protocol format used by all MCP clients
         jsonrpc_request = {
             "jsonrpc": "2.0",
             "id": str(int(time.time() * 1000)),
@@ -209,116 +197,238 @@ async def execute_tool(request: Request) -> JSONResponse:
             },
         }
 
-        start_time = time.time()
+        overall_start = time.time()
 
-        # Make HTTP POST request to the MCP endpoint
-        # This simulates exactly how an external client (like Claude Desktop) would call the tool
-        # MCP may require a session ID that is returned in the first response
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                # Prepare headers
-                # MCP requires Accept header with both application/json and text/event-stream
                 headers = {
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                 }
 
-                # Copy session cookie for authentication
-                # This allows the internal request to be authenticated
                 if "session" in request.cookies:
                     headers["Cookie"] = f"session={request.cookies['session']}"
 
                 logger.info(f"Request headers: {headers}")
                 logger.info(f"Request payload: {jsonrpc_request}")
 
-                # Try at most twice: first attempt may return a session id we must echo back
+                def _parse_jsonrpc_response(http_response: httpx.Response) -> dict | None:
+                    content_type = http_response.headers.get("content-type", "")
+                    if "text/event-stream" in content_type:
+                        for line in http_response.text.split("\n"):
+                            if line.startswith("data: "):
+                                json_str = line[6:].strip()
+                                if not json_str:
+                                    continue
+                                try:
+                                    return json.loads(json_str)
+                                except json.JSONDecodeError:
+                                    logger.warning(
+                                        f"Failed to parse SSE data line: {json_str}"
+                                    )
+                                    break
+                        return None
+                    try:
+                        return http_response.json()
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse JSON response body during MCP request")
+                        return None
+
+                async def _send_initialized_notification(session_headers: dict) -> None:
+                    notify_payload = {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/initialized",
+                    }
+                    notify_response = await client.post(
+                        mcp_url,
+                        json=notify_payload,
+                        headers=session_headers,
+                        follow_redirects=True,
+                    )
+                    logger.info(
+                        "Initialized notification status: %s",
+                        notify_response.status_code,
+                    )
+                    if notify_response.status_code >= 400:
+                        raise RuntimeError(
+                            "Failed to send notifications/initialized "
+                            f"(status {notify_response.status_code})"
+                        )
+                    notify_data = _parse_jsonrpc_response(notify_response) or {}
+                    if notify_data.get("error"):
+                        raise RuntimeError(
+                            "Server returned error for notifications/initialized: "
+                            f"{notify_data['error']}"
+                        )
+
+                initialize_payload = {
+                    "jsonrpc": "2.0",
+                    "id": str(int(time.time() * 1000)),
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "mcp-anywhere-test", "version": "1.0.0"},
+                    },
+                }
+
+                initialize_response = await client.post(
+                    mcp_url,
+                    json=initialize_payload,
+                    headers=headers,
+                    follow_redirects=True,
+                )
+
+                logger.info(
+                    "Initialize response status: %s",
+                    initialize_response.status_code,
+                )
+                logger.info(
+                    "Initialize response headers: %s",
+                    dict(initialize_response.headers),
+                )
+                logger.info(
+                    "Initialize response body: %s",
+                    initialize_response.text[:500],
+                )
+
+                init_data = _parse_jsonrpc_response(initialize_response) or {}
+                if initialize_response.status_code != 200:
+                    duration_ms = int((time.time() - overall_start) * 1000)
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": (
+                                "Failed to initialize MCP session "
+                                f"(HTTP {initialize_response.status_code})"
+                            ),
+                            "error_code": (init_data.get("error") or {}).get("code"),
+                            "error_data": (init_data.get("error") or {}).get("data"),
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
+                if init_data.get("error"):
+                    duration_ms = int((time.time() - overall_start) * 1000)
+                    error_info = init_data["error"]
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": error_info.get("message", "Initialization error"),
+                            "error_code": error_info.get("code"),
+                            "error_data": error_info.get("data"),
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
+                mcp_session_id = initialize_response.headers.get("mcp-session-id")
+                if not mcp_session_id:
+                    result_payload = init_data.get("result") or {}
+                    mcp_session_id = (
+                        result_payload.get("sessionId")
+                        or result_payload.get("session_id")
+                    )
+
+                if not mcp_session_id:
+                    duration_ms = int((time.time() - overall_start) * 1000)
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": "Failed to initialize MCP session: missing session ID",
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
+                session_headers = headers.copy()
+                session_headers["mcp-session-id"] = mcp_session_id
+
+                try:
+                    await _send_initialized_notification(session_headers)
+                except Exception as exc:
+                    duration_ms = int((time.time() - overall_start) * 1000)
+                    logger.exception("Error sending notifications/initialized")
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": str(exc),
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
                 max_attempts = 2
                 attempt = 0
-                mcp_session_id = None
+                response = None
+                duration_ms = 0
 
                 while attempt < max_attempts:
-                    # Add MCP session ID if we have one from a previous attempt
-                    if mcp_session_id:
-                        headers["mcp-session-id"] = mcp_session_id
-                        logger.info(f"Using MCP session ID: {mcp_session_id}")
-
-                    # Make the request to the official /mcp endpoint
+                    attempt += 1
+                    call_headers = session_headers.copy()
+                    call_start = time.time()
                     response = await client.post(
                         mcp_url,
                         json=jsonrpc_request,
-                        headers=headers,
+                        headers=call_headers,
                         follow_redirects=True,
                     )
-
-                    duration_ms = int((time.time() - start_time) * 1000)
+                    duration_ms = int((time.time() - call_start) * 1000)
 
                     logger.info(f"Response status: {response.status_code}")
                     logger.info(f"Response headers: {dict(response.headers)}")
                     logger.info(f"Response body: {response.text[:500]}")
 
-                    # If server returned a session id header, retry with it
                     returned_session_id = response.headers.get("mcp-session-id")
-                    if returned_session_id and not mcp_session_id:
-                        logger.info(f"Server returned mcp-session-id: {returned_session_id}, retrying...")
-                        mcp_session_id = returned_session_id
-                        attempt += 1
-                        continue
-
-                    # No session ID needed or we already have it, break the loop
-                    break
-
-                # Parse response (outside the retry loop)
-                if response.status_code == 200:
-                    # Check if response is SSE (text/event-stream) or JSON
-                    content_type = response.headers.get("content-type", "")
-
-                    if "text/event-stream" in content_type:
-                        # Parse SSE format
-                        # Format: "event: message\ndata: {json}\n\n"
-                        response_text = response.text
-                        logger.info(f"Parsing SSE response: {response_text[:200]}")
-
-                        # Extract JSON from SSE data line
-                        result_data = None
-                        for line in response_text.split("\n"):
-                            if line.startswith("data: "):
-                                json_str = line[6:]  # Remove "data: " prefix
-                                try:
-                                    result_data = json.loads(json_str)
-                                    break
-                                except json.JSONDecodeError:
-                                    logger.warning(f"Failed to parse SSE data line: {json_str}")
-                                    continue
-
-                        if not result_data:
+                    if (
+                        returned_session_id
+                        and returned_session_id != session_headers.get("mcp-session-id")
+                        and attempt < max_attempts
+                    ):
+                        logger.info(
+                            "Server returned new mcp-session-id: %s, re-initializing",
+                            returned_session_id,
+                        )
+                        session_headers["mcp-session-id"] = returned_session_id
+                        try:
+                            await _send_initialized_notification(session_headers)
+                            continue
+                        except Exception as exc:
+                            logger.exception("Error re-sending notifications/initialized")
                             return JSONResponse(
                                 {
                                     "success": False,
-                                    "error": "Failed to parse SSE response",
+                                    "error": str(exc),
                                     "duration_ms": duration_ms,
                                 }
                             )
-                    else:
-                        # Regular JSON response
-                        result_data = response.json()
 
-                    # Check for JSON-RPC error
+                    break
+
+                if response is None:
+                    duration_ms = int((time.time() - overall_start) * 1000)
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": "Failed to contact MCP endpoint",
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
+                if response.status_code == 200:
+                    result_data = _parse_jsonrpc_response(response)
+                    if not result_data:
+                        return JSONResponse(
+                            {
+                                "success": False,
+                                "error": "Failed to parse MCP response",
+                                "duration_ms": duration_ms,
+                            }
+                        )
+
                     if "error" in result_data:
                         error_info = result_data["error"]
-
-                        # On invalid params, try to fetch the tool's input schema from MCP tools/list
                         expected_schema = None
                         if error_info.get("code") == -32602:
                             try:
-                                list_headers = {
-                                    "Content-Type": "application/json",
-                                    "Accept": "application/json, text/event-stream",
-                                }
-                                if "session" in request.cookies:
-                                    list_headers["Cookie"] = f"session={request.cookies['session']}"
-                                if mcp_session_id:
-                                    list_headers["mcp-session-id"] = mcp_session_id
-
+                                list_headers = session_headers.copy()
                                 tools_list_req = {
                                     "jsonrpc": "2.0",
                                     "id": str(int(time.time() * 1000)),
@@ -333,32 +443,21 @@ async def execute_tool(request: Request) -> JSONResponse:
                                     follow_redirects=True,
                                 )
 
-                                if list_resp.status_code == 200:
-                                    list_ct = list_resp.headers.get("content-type", "")
-                                    if "text/event-stream" in list_ct:
-                                        text = list_resp.text
-                                        for line in text.split("\n"):
-                                            if line.startswith("data: "):
-                                                try:
-                                                    data_obj = json.loads(line[6:])
-                                                    break
-                                                except Exception:
-                                                    pass
-                                    else:
-                                        data_obj = list_resp.json()
-
-                                    tools = (data_obj.get("result") or {}).get("tools") or []
-                                    for t in tools:
-                                        if t.get("name") == prefixed_tool_name:
-                                            # Common field names: input_schema or schema
-                                            expected_schema = (
-                                                t.get("input_schema")
-                                                or t.get("schema")
-                                                or t.get("inputSchema")
-                                            )
-                                            break
+                                data_obj = _parse_jsonrpc_response(list_resp) or {}
+                                tools = (data_obj.get("result") or {}).get("tools") or []
+                                for t in tools:
+                                    if t.get("name") == prefixed_tool_name:
+                                        expected_schema = (
+                                            t.get("input_schema")
+                                            or t.get("schema")
+                                            or t.get("inputSchema")
+                                        )
+                                        break
                             except Exception:
-                                logger.debug("Failed to fetch tools/list for schema", exc_info=True)
+                                logger.debug(
+                                    "Failed to fetch tools/list for schema",
+                                    exc_info=True,
+                                )
 
                         return JSONResponse(
                             {
@@ -371,7 +470,6 @@ async def execute_tool(request: Request) -> JSONResponse:
                             }
                         )
 
-                    # Extract result from JSON-RPC response
                     tool_result = result_data.get("result", {})
 
                     return JSONResponse(
@@ -383,8 +481,7 @@ async def execute_tool(request: Request) -> JSONResponse:
                         }
                     )
                 else:
-                    # HTTP error
-                    error_text = response.text[:500]  # Limit error text length
+                    error_text = response.text[:500]
                     return JSONResponse(
                         {
                             "success": False,
@@ -394,7 +491,7 @@ async def execute_tool(request: Request) -> JSONResponse:
                     )
 
             except httpx.TimeoutException:
-                duration_ms = int((time.time() - start_time) * 1000)
+                duration_ms = int((time.time() - overall_start) * 1000)
                 return JSONResponse(
                     {
                         "success": False,
@@ -403,7 +500,7 @@ async def execute_tool(request: Request) -> JSONResponse:
                     }
                 )
             except httpx.RequestError as e:
-                duration_ms = int((time.time() - start_time) * 1000)
+                duration_ms = int((time.time() - overall_start) * 1000)
                 logger.exception(f"HTTP request error: {e}")
                 return JSONResponse(
                     {
@@ -420,6 +517,7 @@ async def execute_tool(request: Request) -> JSONResponse:
         return JSONResponse(
             {"success": False, "error": f"Internal error: {str(e)}"}, status_code=500
         )
+
 
 
 # Define routes
