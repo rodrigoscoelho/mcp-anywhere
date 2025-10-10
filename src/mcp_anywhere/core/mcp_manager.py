@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import time
 from typing import Any
 
 from fastmcp import FastMCP
@@ -132,6 +133,9 @@ class MCPManager:
         self.mounted_servers: dict[str, FastMCP] = {}
         self.mounted_server_names: dict[str, str] = {}
         self._http_client = None  # Cache HTTP client for internal calls
+        self._mcp_session_id: str | None = None
+        self._mcp_session_initialized = False
+        self._mcp_session_lock = asyncio.Lock()
         logger.info("Initialized MCPManager")
 
     @staticmethod
@@ -332,132 +336,224 @@ class MCPManager:
             ) from exc
 
     async def call_tool_via_http(self, tool_key: str, arguments: dict[str, Any], app):
-        """Execute a tool via HTTP request to FastMCP app to ensure context is established.
-        
-        Args:
-            tool_key: The tool key to execute
-            arguments: Tool arguments
-            app: The Starlette app containing the FastMCP HTTP app
-            
-        Returns:
-            Tool execution result
-        """
-        
+        """Execute a tool via HTTP request to FastMCP app to ensure context is established."""
+
         logger.debug(f"DEBUG: Executando ferramenta via HTTP para garantir contexto: {tool_key}")
-        
+
         # Create HTTP client with ASGI transport
         if self._http_client is None:
             from httpx import ASGITransport, AsyncClient
+
             self._http_client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-        
-        # Make HTTP request to FastMCP endpoint
-        try:
-            # FastMCP HTTP API endpoint for tool calls
-            mcp_path = "/mcp/"  # FastMCP mounts at /mcp/ path
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
-                    "name": tool_key,
-                    "arguments": arguments
+
+        import json as json_module
+
+        mcp_path = "/mcp/"  # FastMCP mounts at /mcp/ path
+        base_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+
+        def _extract_messages(response):
+            """Parse a FastMCP response (JSON or SSE) into JSON-RPC message objects."""
+
+            messages: list[Any] = []
+            content_type = response.headers.get("content-type", "")
+
+            if "text/event-stream" in content_type:
+                stream_text = response.text
+                for raw_line in stream_text.splitlines():
+                    line = raw_line.strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data_json = line[6:].strip()
+                    if not data_json:
+                        continue
+                    try:
+                        messages.append(json_module.loads(data_json))
+                    except json_module.JSONDecodeError as exc:
+                        logger.debug(
+                            "DEBUG: Erro ao parsear linha SSE: %s - %s",
+                            data_json[:100],
+                            exc,
+                        )
+                        continue
+            else:
+                try:
+                    messages.append(response.json())
+                except json_module.JSONDecodeError:
+                    logger.warning(
+                        "DEBUG: Falha ao parsear JSON da resposta MCP (content-type=%s)",
+                        content_type,
+                    )
+
+            return messages
+
+        async def _ensure_session(force: bool = False) -> str:
+            """Initialize the MCP session (initialize + notifications/initialized)."""
+
+            async with self._mcp_session_lock:
+                if (
+                    not force
+                    and self._mcp_session_id
+                    and self._mcp_session_initialized
+                ):
+                    return self._mcp_session_id
+
+                if force:
+                    self._mcp_session_id = None
+                    self._mcp_session_initialized = False
+
+                initialize_payload = {
+                    "jsonrpc": "2.0",
+                    "id": int(time.time() * 1000),
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "mcp-manager",
+                            "version": "1.0.0",
+                        },
+                    },
                 }
-            }
-            
-            logger.debug(f"DEBUG: Fazendo requisição HTTP para {mcp_path} com payload: {payload}")
 
-            # Prepare headers including any persistent mcp session id
-            headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-            if getattr(self, "_mcp_session_id", None):
-                headers["mcp-session-id"] = self._mcp_session_id
+                init_response = await self._http_client.post(
+                    mcp_path,
+                    json=initialize_payload,
+                    headers=base_headers.copy(),
+                )
 
-            # Try at most twice: first attempt may return a session id we must echo back
+                if init_response.status_code != 200:
+                    raise RuntimeError(
+                        f"HTTP {init_response.status_code} ao inicializar sessão MCP: {init_response.text[:200]}"
+                    )
+
+                init_messages = _extract_messages(init_response)
+                for message in init_messages:
+                    if isinstance(message, dict) and "error" in message:
+                        error_info = message["error"]
+                        error_message = error_info.get("message", "Initialization error")
+                        error_details = error_info.get("data")
+                        if error_details:
+                            error_message = f"{error_message}: {error_details}"
+                        raise RuntimeError(error_message)
+
+                session_id = init_response.headers.get("mcp-session-id")
+                if not session_id:
+                    for message in reversed(init_messages):
+                        if isinstance(message, dict):
+                            result_payload = message.get("result") or {}
+                            session_id = (
+                                result_payload.get("sessionId")
+                                or result_payload.get("session_id")
+                            )
+                            if session_id:
+                                break
+
+                if not session_id:
+                    raise RuntimeError("Falha ao inicializar sessão MCP: mcp-session-id ausente")
+
+                notify_headers = {**base_headers, "mcp-session-id": session_id}
+                notify_response = await self._http_client.post(
+                    mcp_path,
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    headers=notify_headers,
+                )
+
+                if notify_response.status_code >= 400:
+                    raise RuntimeError(
+                        f"HTTP {notify_response.status_code} ao enviar notifications/initialized: {notify_response.text[:200]}"
+                    )
+
+                notify_messages = _extract_messages(notify_response)
+                for message in notify_messages:
+                    if isinstance(message, dict) and message.get("error"):
+                        error_info = message["error"]
+                        error_message = error_info.get("message", "notifications/initialized error")
+                        error_details = error_info.get("data")
+                        if error_details:
+                            error_message = f"{error_message}: {error_details}"
+                        raise RuntimeError(error_message)
+
+                self._mcp_session_id = session_id
+                self._mcp_session_initialized = True
+                return session_id
+
+        try:
+            session_id = await _ensure_session()
+
             max_attempts = 2
             attempt = 0
             while attempt < max_attempts:
+                attempt += 1
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": int(time.time() * 1000),
+                    "method": "tools/call",
+                    "params": {
+                        "name": tool_key,
+                        "arguments": arguments,
+                    },
+                }
+
+                call_headers = {**base_headers, "mcp-session-id": session_id}
                 response = await self._http_client.post(
                     mcp_path,
                     json=payload,
-                    headers=headers
+                    headers=call_headers,
                 )
 
                 if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "")
-                    if "application/json" in content_type:
-                        result = response.json()
-                        logger.debug(f"DEBUG: Chamada HTTP bem sucedida: {result}")
-                        return result.get("result", result)
-                    if "text/event-stream" in content_type:
-                        # Parse SSE stream to extract the result
-                        stream_text = response.text
-                        logger.debug(f"DEBUG: Chamada HTTP retornou SSE stream, parseando...")
-                        logger.debug(f"DEBUG: SSE stream completo (primeiros 500 chars): {stream_text[:500]}")
+                    messages = _extract_messages(response)
+                    if not messages:
+                        raise RuntimeError("Resposta MCP vazia ao executar ferramenta")
 
-                        # Parse SSE format: lines starting with "data: " contain JSON
-                        import json as json_module
-                        result_data = None
-                        error_data = None
-                        for line in stream_text.split('\n'):
-                            line = line.strip()
-                            if line.startswith('data: '):
-                                try:
-                                    data_json = line[6:]  # Remove "data: " prefix
-                                    logger.debug(f"DEBUG: Tentando parsear data line: {data_json[:200]}")
-                                    parsed = json_module.loads(data_json)
-                                    # Look for the result or error in the parsed data
-                                    if isinstance(parsed, dict):
-                                        if "error" in parsed:
-                                            error_data = parsed["error"]
-                                            logger.error(f"DEBUG: Erro retornado pela ferramenta: {error_data}")
-                                            # Raise ToolError with the error message
-                                            error_msg = error_data.get("message", "Unknown error")
-                                            error_details = error_data.get("data", "")
-                                            full_msg = f"{error_msg}: {error_details}" if error_details else error_msg
-                                            raise ToolError(full_msg)
-                                        elif "result" in parsed:
-                                            result_data = parsed["result"]
-                                            logger.debug(f"DEBUG: Encontrado result no SSE: {result_data}")
-                                        elif "content" in parsed:
-                                            result_data = parsed
-                                            logger.debug(f"DEBUG: Encontrado content no SSE: {result_data}")
-                                except ToolError:
-                                    # Re-raise ToolError to be handled by the caller
-                                    raise
-                                except (json_module.JSONDecodeError, ValueError) as e:
-                                    logger.debug(f"DEBUG: Erro ao parsear linha SSE: {line[:100]}... - {e}")
-                                    continue
+                    last_payload: Any | None = None
+                    for message in messages:
+                        if isinstance(message, dict) and "error" in message:
+                            error_info = message["error"]
+                            error_message = error_info.get("message", "Unknown error")
+                            error_details = error_info.get("data")
+                            if error_details:
+                                error_message = f"{error_message}: {error_details}"
+                            raise ToolError(error_message)
 
-                        if result_data is not None:
-                            logger.debug(f"DEBUG: SSE parseado com sucesso: {result_data}")
-                            return result_data
+                        if isinstance(message, dict) and "result" in message:
+                            last_payload = message["result"]
+                        elif isinstance(message, dict):
+                            last_payload = message
                         else:
-                            logger.warning(f"DEBUG: Não foi possível extrair resultado do SSE stream: {stream_text[:200]}...")
-                            return {"stream": stream_text}
+                            last_payload = message
 
-                    # Unknown content type: return raw text
-                    raw_text = response.text
-                    logger.debug(f"DEBUG: Chamada HTTP retornou content-type={content_type}; returning raw text")
-                    return raw_text
+                    if last_payload is not None:
+                        return last_payload
 
-                # If server returned a session id header, retry with it
-                session_id = response.headers.get("mcp-session-id")
-                if session_id and "mcp-session-id" not in headers:
-                    logger.debug(f"DEBUG: Server requested mcp-session-id={session_id}; retrying once with this header")
-                    self._mcp_session_id = session_id
-                    headers["mcp-session-id"] = session_id
-                    attempt += 1
+                    return messages[-1]
+
+                returned_session_id = response.headers.get("mcp-session-id")
+                if returned_session_id and returned_session_id != session_id:
+                    logger.debug(
+                        "DEBUG: Server returned new mcp-session-id=%s; re-inicializando sessão",
+                        returned_session_id,
+                    )
+                    session_id = await _ensure_session(force=True)
                     continue
 
-                # Non-retriable failure; log and break to fallback
                 resp_text = response.text if hasattr(response, "text") else "<no response body>"
-                logger.error(f"DEBUG: Falha na chamada HTTP: status={response.status_code}, response='{resp_text}', url='{mcp_path}'")
+                logger.error(
+                    "DEBUG: Falha na chamada HTTP: status=%s, response='%s', url='%s'",
+                    response.status_code,
+                    resp_text[:200],
+                    mcp_path,
+                )
                 break
 
             # Fallback to direct call (no app) to avoid recursion
             return await self.call_tool(tool_key, arguments, None)
 
         except ToolError:
-            # Re-raise ToolError - this is a legitimate tool error, not a communication error
+            # Re-raise ToolError - this is a legitimate tool error
             raise
         except Exception as e:
             logger.error(f"DEBUG: Erro na chamada HTTP: {e}")
