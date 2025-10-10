@@ -26,6 +26,33 @@ def _is_authenticated(request: Request) -> bool:
     return bool(request.session.get("user_id"))
 
 
+async def test_debug(request: Request) -> JSONResponse:
+    """Debug endpoint to check MCP configuration."""
+    if not _is_authenticated(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # Get MCP manager from app state
+    mcp_manager = getattr(request.app.state, "mcp_manager", None)
+
+    debug_info = {
+        "mcp_path_mount": Config.MCP_PATH_MOUNT,
+        "mcp_path_prefix": Config.MCP_PATH_PREFIX,
+        "server_url": Config.SERVER_URL,
+        "transport_mode": getattr(request.app.state, "transport_mode", "unknown"),
+        "mcp_manager_available": mcp_manager is not None,
+        "request_url": str(request.url),
+        "request_host": request.url.hostname,
+        "request_port": request.url.port,
+        "request_scheme": request.url.scheme,
+    }
+
+    # Try to list mounted servers
+    if mcp_manager:
+        debug_info["mounted_servers"] = list(mcp_manager.mounted_servers.keys())
+
+    return JSONResponse(debug_info)
+
+
 async def test_tools_page(request: Request) -> Response:
     """Render the main testing page."""
     if not _is_authenticated(request):
@@ -145,14 +172,22 @@ async def execute_tool(request: Request) -> JSONResponse:
                 )
 
         # Build the MCP endpoint URL
-        # Use localhost to make an internal request to the /mcp endpoint
-        # This simulates how an external client would call the API
-        host = request.url.hostname or "localhost"
-        port = request.url.port or 8000
-        scheme = request.url.scheme or "http"
+        # Since we're behind a proxy, we should make the request to localhost
+        # but use the internal port where uvicorn is running
+
+        # For internal requests, always use localhost and the actual server port
+        # This avoids going through the proxy
+        host = "127.0.0.1"
+        port = 8000  # Default uvicorn port
+        scheme = "http"  # Internal requests use HTTP
 
         # Build the full MCP URL
-        mcp_url = f"{scheme}://{host}:{port}{Config.MCP_PATH_PREFIX}"
+        # Use MCP_PATH_MOUNT (without trailing slash) + "/" for the JSON-RPC endpoint
+        mcp_url = f"{scheme}://{host}:{port}{Config.MCP_PATH_MOUNT}/"
+
+        logger.info(f"Making internal MCP request to: {mcp_url}")
+        logger.info(f"Tool name: {server_id}_{tool_name}")
+        logger.info(f"Arguments: {arguments}")
 
         # The tool name should include the server prefix
         # Format: {server_id}_{tool_name}
@@ -186,6 +221,9 @@ async def execute_tool(request: Request) -> JSONResponse:
                 if "session" in request.cookies:
                     headers["Cookie"] = f"session={request.cookies['session']}"
 
+                logger.info(f"Request headers: {headers}")
+                logger.info(f"Request payload: {jsonrpc_request}")
+
                 # Make the request to the official /mcp endpoint
                 response = await client.post(
                     mcp_url,
@@ -195,6 +233,9 @@ async def execute_tool(request: Request) -> JSONResponse:
                 )
 
                 duration_ms = int((time.time() - start_time) * 1000)
+
+                logger.info(f"Response status: {response.status_code}")
+                logger.info(f"Response body: {response.text[:500]}")
 
                 # Parse response
                 if response.status_code == 200:
@@ -266,6 +307,7 @@ async def execute_tool(request: Request) -> JSONResponse:
 # Define routes
 test_routes = [
     Route("/test", endpoint=test_tools_page, methods=["GET"]),
+    Route("/test/debug", endpoint=test_debug, methods=["GET"]),
     Route("/test/servers/{server_id}/tools", endpoint=get_server_tools, methods=["GET"]),
     Route("/test/execute", endpoint=execute_tool, methods=["POST"]),
 ]
