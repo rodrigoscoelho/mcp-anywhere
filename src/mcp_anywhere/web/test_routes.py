@@ -1,17 +1,19 @@
+
 """Routes for MCP Server testing and simulation."""
 
 import json
 import time
-from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
 
-from mcp_anywhere.database import MCPServer, MCPServerTool, get_async_session
+from mcp_anywhere.config import Config
+from mcp_anywhere.database import MCPServer, get_async_session
 from mcp_anywhere.logging_config import get_logger
 from mcp_anywhere.web.routes import get_template_context
 
@@ -110,7 +112,7 @@ async def get_server_tools(request: Request) -> JSONResponse:
 
 
 async def execute_tool(request: Request) -> JSONResponse:
-    """Execute a tool on an MCP server by calling it directly through the MCP manager."""
+    """Execute a tool via the official /mcp endpoint as an external client would."""
     if not _is_authenticated(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -126,7 +128,7 @@ async def execute_tool(request: Request) -> JSONResponse:
                 {"error": "server_id and tool_name are required"}, status_code=400
             )
 
-        # Get server details
+        # Get server details to validate it exists and is active
         async with get_async_session() as db_session:
             stmt = select(MCPServer).where(MCPServer.id == server_id)
             result = await db_session.execute(stmt)
@@ -142,87 +144,115 @@ async def execute_tool(request: Request) -> JSONResponse:
                     {"error": f"Server '{server.name}' is not active"}, status_code=400
                 )
 
-        # Get the MCP manager from app state
-        mcp_manager = getattr(request.app.state, "mcp_manager", None)
-        if not mcp_manager:
-            return JSONResponse(
-                {"error": "MCP manager not available"}, status_code=500
-            )
+        # Build the MCP endpoint URL
+        # Use localhost to make an internal request to the /mcp endpoint
+        # This simulates how an external client would call the API
+        host = request.url.hostname or "localhost"
+        port = request.url.port or 8000
+        scheme = request.url.scheme or "http"
+
+        # Build the full MCP URL
+        mcp_url = f"{scheme}://{host}:{port}{Config.MCP_PATH_PREFIX}"
 
         # The tool name should include the server prefix
         # Format: {server_id}_{tool_name}
         prefixed_tool_name = f"{server_id}_{tool_name}"
 
+        # Create JSON-RPC 2.0 request for tools/call
+        # This is the standard MCP protocol format used by all MCP clients
+        jsonrpc_request = {
+            "jsonrpc": "2.0",
+            "id": str(int(time.time() * 1000)),
+            "method": "tools/call",
+            "params": {
+                "name": prefixed_tool_name,
+                "arguments": arguments,
+            },
+        }
+
         start_time = time.time()
 
-        try:
-            # Call the tool directly through the MCP manager's router
-            # The router has a _tool_manager that can execute tools
-            tool_manager = mcp_manager.router._tool_manager
+        # Make HTTP POST request to the MCP endpoint
+        # This simulates exactly how an external client (like Claude Desktop) would call the tool
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                # Prepare headers
+                headers = {
+                    "Content-Type": "application/json",
+                }
 
-            # Get the tool
-            tools = await tool_manager.get_tools()
-            if prefixed_tool_name not in tools:
+                # Copy session cookie for authentication
+                # This allows the internal request to be authenticated
+                if "session" in request.cookies:
+                    headers["Cookie"] = f"session={request.cookies['session']}"
+
+                # Make the request to the official /mcp endpoint
+                response = await client.post(
+                    mcp_url,
+                    json=jsonrpc_request,
+                    headers=headers,
+                    follow_redirects=True,
+                )
+
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                # Parse response
+                if response.status_code == 200:
+                    result_data = response.json()
+
+                    # Check for JSON-RPC error
+                    if "error" in result_data:
+                        error_info = result_data["error"]
+                        return JSONResponse(
+                            {
+                                "success": False,
+                                "error": error_info.get("message", "Unknown error"),
+                                "error_code": error_info.get("code"),
+                                "duration_ms": duration_ms,
+                            }
+                        )
+
+                    # Extract result from JSON-RPC response
+                    tool_result = result_data.get("result", {})
+
+                    return JSONResponse(
+                        {
+                            "success": True,
+                            "result": tool_result,
+                            "duration_ms": duration_ms,
+                            "timestamp": time.time(),
+                        }
+                    )
+                else:
+                    # HTTP error
+                    error_text = response.text[:500]  # Limit error text length
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": f"HTTP {response.status_code}: {error_text}",
+                            "duration_ms": duration_ms,
+                        }
+                    )
+
+            except httpx.TimeoutException:
+                duration_ms = int((time.time() - start_time) * 1000)
                 return JSONResponse(
                     {
                         "success": False,
-                        "error": f"Tool '{tool_name}' not found on server '{server.name}'",
-                        "duration_ms": 0,
+                        "error": "Request timeout (30s)",
+                        "duration_ms": duration_ms,
                     }
                 )
-
-            # Execute the tool
-            tool_func = tools[prefixed_tool_name]
-            result = await tool_func(**arguments)
-
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            # Format the result
-            # MCP tools return a list of content items
-            if hasattr(result, 'content'):
-                # It's a proper MCP result
-                result_data = {
-                    "content": [
-                        {
-                            "type": item.type,
-                            "text": item.text if hasattr(item, 'text') else str(item)
-                        }
-                        for item in result.content
-                    ]
-                }
-            else:
-                # Fallback for other result types
-                result_data = {"content": [{"type": "text", "text": str(result)}]}
-
-            return JSONResponse(
-                {
-                    "success": True,
-                    "result": result_data,
-                    "duration_ms": duration_ms,
-                    "timestamp": time.time(),
-                }
-            )
-
-        except TypeError as e:
-            # Handle argument errors
-            duration_ms = int((time.time() - start_time) * 1000)
-            return JSONResponse(
-                {
-                    "success": False,
-                    "error": f"Invalid arguments: {str(e)}",
-                    "duration_ms": duration_ms,
-                }
-            )
-        except Exception as e:
-            duration_ms = int((time.time() - start_time) * 1000)
-            logger.exception(f"Error executing tool {prefixed_tool_name}: {e}")
-            return JSONResponse(
-                {
-                    "success": False,
-                    "error": f"Tool execution failed: {str(e)}",
-                    "duration_ms": duration_ms,
-                }
-            )
+            except httpx.RequestError as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.exception(f"HTTP request error: {e}")
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": f"Request failed: {str(e)}",
+                        "duration_ms": duration_ms,
+                    }
+                )
 
     except json.JSONDecodeError:
         return JSONResponse({"error": "Invalid JSON in request body"}, status_code=400)

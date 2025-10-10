@@ -90,10 +90,11 @@ A comprehensive testing and simulation page has been added to MCP Anywhere, allo
 
 ### Architecture Decisions
 
-1. **Direct MCP Manager Integration**
-   - Instead of making HTTP requests to the MCP endpoint, the implementation calls the MCP manager directly
-   - This avoids authentication complexity and is more efficient
-   - Tools are accessed via `mcp_manager.router._tool_manager`
+1. **External MCP Endpoint Integration**
+   - Makes HTTP POST requests to the official `/mcp` endpoint
+   - Simulates exactly how external clients (like Claude Desktop) interact with the server
+   - Uses JSON-RPC 2.0 protocol for `tools/call` method
+   - Authenticates using session cookies from the web UI
 
 2. **Tool Naming Convention**
    - Tools are prefixed with server ID: `{server_id}_{tool_name}`
