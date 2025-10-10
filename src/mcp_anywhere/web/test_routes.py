@@ -209,6 +209,7 @@ async def execute_tool(request: Request) -> JSONResponse:
 
         # Make HTTP POST request to the MCP endpoint
         # This simulates exactly how an external client (like Claude Desktop) would call the tool
+        # MCP may require a session ID that is returned in the first response
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 # Prepare headers
@@ -226,22 +227,76 @@ async def execute_tool(request: Request) -> JSONResponse:
                 logger.info(f"Request headers: {headers}")
                 logger.info(f"Request payload: {jsonrpc_request}")
 
-                # Make the request to the official /mcp endpoint
-                response = await client.post(
-                    mcp_url,
-                    json=jsonrpc_request,
-                    headers=headers,
-                    follow_redirects=True,
-                )
+                # Try at most twice: first attempt may return a session id we must echo back
+                max_attempts = 2
+                attempt = 0
+                mcp_session_id = None
 
-                duration_ms = int((time.time() - start_time) * 1000)
+                while attempt < max_attempts:
+                    # Add MCP session ID if we have one from a previous attempt
+                    if mcp_session_id:
+                        headers["mcp-session-id"] = mcp_session_id
+                        logger.info(f"Using MCP session ID: {mcp_session_id}")
 
-                logger.info(f"Response status: {response.status_code}")
-                logger.info(f"Response body: {response.text[:500]}")
+                    # Make the request to the official /mcp endpoint
+                    response = await client.post(
+                        mcp_url,
+                        json=jsonrpc_request,
+                        headers=headers,
+                        follow_redirects=True,
+                    )
 
-                # Parse response
+                    duration_ms = int((time.time() - start_time) * 1000)
+
+                    logger.info(f"Response status: {response.status_code}")
+                    logger.info(f"Response headers: {dict(response.headers)}")
+                    logger.info(f"Response body: {response.text[:500]}")
+
+                    # If server returned a session id header, retry with it
+                    returned_session_id = response.headers.get("mcp-session-id")
+                    if returned_session_id and not mcp_session_id:
+                        logger.info(f"Server returned mcp-session-id: {returned_session_id}, retrying...")
+                        mcp_session_id = returned_session_id
+                        attempt += 1
+                        continue
+
+                    # No session ID needed or we already have it, break the loop
+                    break
+
+                # Parse response (outside the retry loop)
                 if response.status_code == 200:
-                    result_data = response.json()
+                    # Check if response is SSE (text/event-stream) or JSON
+                    content_type = response.headers.get("content-type", "")
+
+                    if "text/event-stream" in content_type:
+                        # Parse SSE format
+                        # Format: "event: message\ndata: {json}\n\n"
+                        response_text = response.text
+                        logger.info(f"Parsing SSE response: {response_text[:200]}")
+
+                        # Extract JSON from SSE data line
+                        result_data = None
+                        for line in response_text.split("\n"):
+                            if line.startswith("data: "):
+                                json_str = line[6:]  # Remove "data: " prefix
+                                try:
+                                    result_data = json.loads(json_str)
+                                    break
+                                except json.JSONDecodeError:
+                                    logger.warning(f"Failed to parse SSE data line: {json_str}")
+                                    continue
+
+                        if not result_data:
+                            return JSONResponse(
+                                {
+                                    "success": False,
+                                    "error": "Failed to parse SSE response",
+                                    "duration_ms": duration_ms,
+                                }
+                            )
+                    else:
+                        # Regular JSON response
+                        result_data = response.json()
 
                     # Check for JSON-RPC error
                     if "error" in result_data:
@@ -251,6 +306,7 @@ async def execute_tool(request: Request) -> JSONResponse:
                                 "success": False,
                                 "error": error_info.get("message", "Unknown error"),
                                 "error_code": error_info.get("code"),
+                                "error_data": error_info.get("data"),
                                 "duration_ms": duration_ms,
                             }
                         )
