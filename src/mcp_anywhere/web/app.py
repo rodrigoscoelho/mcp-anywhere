@@ -29,6 +29,7 @@ from mcp_anywhere.web.config_routes import config_routes
 from mcp_anywhere.web.api_token_routes import api_token_routes
 from mcp_anywhere.web.settings_routes import settings_routes
 from mcp_anywhere.web.log_routes import tool_usage_routes
+from mcp_anywhere.web.test_routes import test_routes
 from mcp_anywhere.web.middleware import (
     MCPAuthMiddleware,
     RedirectMiddleware,
@@ -144,6 +145,7 @@ You can use tools/list to see all available tools from all mounted servers.
             *settings_routes,
             *api_token_routes,
             *tool_usage_routes,
+            *test_routes,
             *routes.routes,
             # Static files mount
             Mount(

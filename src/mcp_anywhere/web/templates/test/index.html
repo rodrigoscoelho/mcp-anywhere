@@ -1,0 +1,404 @@
+{% extends "base.html" %}
+
+{% block title %}Test MCP Tools - MCP Anywhere{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Test MCP Tools</h1>
+        <p class="mt-2 text-gray-600">
+            Interactively test and validate your configured MCP Server tools
+        </p>
+    </div>
+
+    {% if not servers %}
+    <div class="bg-white rounded-lg shadow-sm p-8 text-center">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <h3 class="mt-4 text-lg font-medium text-gray-900">No active servers</h3>
+        <p class="mt-2 text-sm text-gray-500">Add and activate an MCP server to start testing tools.</p>
+        <div class="mt-6">
+            <a href="/servers/add" class="btn-primary inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md">
+                Add Server
+            </a>
+        </div>
+    </div>
+    {% else %}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left Panel: Server & Tool Selection -->
+        <div class="lg:col-span-1 space-y-6">
+            <!-- Server Selection -->
+            <div class="bg-white rounded-lg shadow-sm p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Select Server</h2>
+                <select id="server-select" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Choose a server...</option>
+                    {% for server in servers %}
+                    <option value="{{ server.id }}">{{ server.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Tool Selection -->
+            <div id="tool-selection" class="bg-white rounded-lg shadow-sm p-6 hidden">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Select Tool</h2>
+                <div id="tools-loading" class="text-center py-4 hidden">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <p class="mt-2 text-sm text-gray-600">Loading tools...</p>
+                </div>
+                <div id="tools-list" class="space-y-2"></div>
+                <div id="tools-error" class="hidden text-red-600 text-sm"></div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Tool Form & Results -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Tool Details & Form -->
+            <div id="tool-form-container" class="bg-white rounded-lg shadow-sm p-6 hidden">
+                <div class="mb-6">
+                    <h2 class="text-lg font-semibold text-gray-900" id="tool-title"></h2>
+                    <p class="mt-1 text-sm text-gray-600" id="tool-description"></p>
+                </div>
+
+                <form id="tool-form" class="space-y-4">
+                    <div id="form-fields"></div>
+                    
+                    <div class="flex items-center justify-between pt-4 border-t">
+                        <button type="button" id="clear-form" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                            Clear
+                        </button>
+                        <button type="submit" id="execute-btn" class="px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            Execute Tool
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Execution Results -->
+            <div id="results-container" class="bg-white rounded-lg shadow-sm p-6 hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Execution Results</h2>
+                    <button id="clear-results" class="text-sm text-gray-600 hover:text-gray-900">Clear</button>
+                </div>
+                
+                <!-- Execution Metadata -->
+                <div id="execution-metadata" class="mb-4 p-3 bg-gray-50 rounded-md text-sm"></div>
+                
+                <!-- Result Content -->
+                <div id="result-content" class="space-y-4"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+// State management
+let currentServer = null;
+let currentTool = null;
+let toolsData = [];
+
+// DOM elements
+const serverSelect = document.getElementById('server-select');
+const toolSelection = document.getElementById('tool-selection');
+const toolsList = document.getElementById('tools-list');
+const toolsLoading = document.getElementById('tools-loading');
+const toolsError = document.getElementById('tools-error');
+const toolFormContainer = document.getElementById('tool-form-container');
+const toolForm = document.getElementById('tool-form');
+const formFields = document.getElementById('form-fields');
+const toolTitle = document.getElementById('tool-title');
+const toolDescription = document.getElementById('tool-description');
+const resultsContainer = document.getElementById('results-container');
+const resultContent = document.getElementById('result-content');
+const executionMetadata = document.getElementById('execution-metadata');
+const executeBtn = document.getElementById('execute-btn');
+
+// Event listeners
+serverSelect?.addEventListener('change', handleServerChange);
+document.getElementById('clear-form')?.addEventListener('click', clearForm);
+document.getElementById('clear-results')?.addEventListener('click', clearResults);
+toolForm?.addEventListener('submit', handleToolExecution);
+
+async function handleServerChange(e) {
+    const serverId = e.target.value;
+    
+    if (!serverId) {
+        toolSelection.classList.add('hidden');
+        toolFormContainer.classList.add('hidden');
+        return;
+    }
+    
+    currentServer = serverId;
+    toolSelection.classList.remove('hidden');
+    toolFormContainer.classList.add('hidden');
+    toolsLoading.classList.remove('hidden');
+    toolsList.innerHTML = '';
+    toolsError.classList.add('hidden');
+    
+    try {
+        const response = await fetch(`/test/servers/${serverId}/tools`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to fetch tools');
+        }
+        
+        toolsData = data.tools;
+        renderToolsList(data.tools);
+    } catch (error) {
+        toolsError.textContent = error.message;
+        toolsError.classList.remove('hidden');
+    } finally {
+        toolsLoading.classList.add('hidden');
+    }
+}
+
+function renderToolsList(tools) {
+    if (tools.length === 0) {
+        toolsList.innerHTML = '<p class="text-sm text-gray-500">No enabled tools found for this server.</p>';
+        return;
+    }
+    
+    toolsList.innerHTML = tools.map(tool => `
+        <button type="button" 
+                class="tool-item w-full text-left px-4 py-3 rounded-md border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                data-tool-id="${tool.id}"
+                data-tool-name="${tool.name}">
+            <div class="font-medium text-gray-900">${escapeHtml(tool.name)}</div>
+            ${tool.description ? `<div class="text-sm text-gray-600 mt-1">${escapeHtml(tool.description)}</div>` : ''}
+        </button>
+    `).join('');
+    
+    // Add click handlers
+    document.querySelectorAll('.tool-item').forEach(btn => {
+        btn.addEventListener('click', () => handleToolSelect(btn.dataset.toolName));
+    });
+}
+
+function handleToolSelect(toolName) {
+    const tool = toolsData.find(t => t.name === toolName);
+    if (!tool) return;
+    
+    currentTool = tool;
+    toolTitle.textContent = tool.name;
+    toolDescription.textContent = tool.description || 'No description available';
+    
+    // Generate form fields from schema
+    generateFormFields(tool.schema);
+    
+    toolFormContainer.classList.remove('hidden');
+    resultsContainer.classList.add('hidden');
+}
+
+function generateFormFields(schema) {
+    formFields.innerHTML = '';
+    
+    if (!schema || !schema.properties) {
+        formFields.innerHTML = '<p class="text-sm text-gray-500">This tool has no parameters.</p>';
+        return;
+    }
+    
+    const properties = schema.properties;
+    const required = schema.required || [];
+    
+    Object.entries(properties).forEach(([fieldName, fieldSchema]) => {
+        const isRequired = required.includes(fieldName);
+        const fieldHtml = createFormField(fieldName, fieldSchema, isRequired);
+        formFields.insertAdjacentHTML('beforeend', fieldHtml);
+    });
+}
+
+function createFormField(name, schema, isRequired) {
+    const type = schema.type || 'string';
+    const description = schema.description || '';
+    const label = name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    
+    let inputHtml = '';
+    
+    switch (type) {
+        case 'boolean':
+            inputHtml = `
+                <label class="flex items-center">
+                    <input type="checkbox" name="${name}" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="ml-2 text-sm text-gray-700">${escapeHtml(description || 'Enable this option')}</span>
+                </label>
+            `;
+            break;
+        case 'number':
+        case 'integer':
+            inputHtml = `
+                <input type="number" 
+                       name="${name}" 
+                       ${isRequired ? 'required' : ''}
+                       ${schema.minimum !== undefined ? `min="${schema.minimum}"` : ''}
+                       ${schema.maximum !== undefined ? `max="${schema.maximum}"` : ''}
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       placeholder="${escapeHtml(description)}">
+            `;
+            break;
+        case 'array':
+        case 'object':
+            inputHtml = `
+                <textarea name="${name}" 
+                          rows="3"
+                          ${isRequired ? 'required' : ''}
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                          placeholder="${type === 'array' ? '["item1", "item2"]' : '{"key": "value"}'}">${schema.default ? JSON.stringify(schema.default, null, 2) : ''}</textarea>
+                <p class="mt-1 text-xs text-gray-500">Enter valid JSON ${type}</p>
+            `;
+            break;
+        default:
+            inputHtml = `
+                <input type="text" 
+                       name="${name}" 
+                       ${isRequired ? 'required' : ''}
+                       ${schema.maxLength ? `maxlength="${schema.maxLength}"` : ''}
+                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       placeholder="${escapeHtml(description)}">
+            `;
+    }
+    
+    return `
+        <div class="form-field">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+                ${escapeHtml(label)}
+                ${isRequired ? '<span class="text-red-500">*</span>' : ''}
+            </label>
+            ${inputHtml}
+            ${description && type !== 'boolean' ? `<p class="mt-1 text-xs text-gray-500">${escapeHtml(description)}</p>` : ''}
+        </div>
+    `;
+}
+
+async function handleToolExecution(e) {
+    e.preventDefault();
+    
+    if (!currentServer || !currentTool) return;
+    
+    // Collect form data
+    const formData = new FormData(toolForm);
+    const arguments = {};
+    
+    for (const [key, value] of formData.entries()) {
+        const field = currentTool.schema?.properties?.[key];
+        const type = field?.type || 'string';
+        
+        if (type === 'boolean') {
+            arguments[key] = value === 'on';
+        } else if (type === 'number' || type === 'integer') {
+            arguments[key] = value ? Number(value) : undefined;
+        } else if (type === 'array' || type === 'object') {
+            try {
+                arguments[key] = value ? JSON.parse(value) : undefined;
+            } catch (e) {
+                alert(`Invalid JSON for field "${key}"`);
+                return;
+            }
+        } else {
+            arguments[key] = value || undefined;
+        }
+    }
+    
+    // Remove undefined values
+    Object.keys(arguments).forEach(key => arguments[key] === undefined && delete arguments[key]);
+    
+    // Show loading state
+    executeBtn.disabled = true;
+    executeBtn.textContent = 'Executing...';
+    
+    try {
+        const response = await fetch('/test/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({
+                server_id: currentServer,
+                tool_name: currentTool.name,
+                arguments: arguments
+            })
+        });
+        
+        const result = await response.json();
+        displayResults(result);
+    } catch (error) {
+        displayResults({
+            success: false,
+            error: error.message
+        });
+    } finally {
+        executeBtn.disabled = false;
+        executeBtn.textContent = 'Execute Tool';
+    }
+}
+
+function displayResults(result) {
+    resultsContainer.classList.remove('hidden');
+    
+    // Display metadata
+    const timestamp = new Date(result.timestamp * 1000 || Date.now()).toLocaleString();
+    const statusClass = result.success ? 'text-green-600' : 'text-red-600';
+    const statusText = result.success ? 'Success' : 'Error';
+    
+    executionMetadata.innerHTML = `
+        <div class="grid grid-cols-3 gap-4">
+            <div>
+                <span class="text-gray-600">Status:</span>
+                <span class="font-semibold ${statusClass}">${statusText}</span>
+            </div>
+            <div>
+                <span class="text-gray-600">Duration:</span>
+                <span class="font-semibold">${result.duration_ms || 0}ms</span>
+            </div>
+            <div>
+                <span class="text-gray-600">Time:</span>
+                <span class="font-semibold">${timestamp}</span>
+            </div>
+        </div>
+    `;
+    
+    // Display result content
+    if (result.success) {
+        resultContent.innerHTML = `
+            <div class="border border-green-200 bg-green-50 rounded-md p-4">
+                <h3 class="text-sm font-semibold text-green-900 mb-2">Result</h3>
+                <pre class="text-sm text-green-800 whitespace-pre-wrap overflow-x-auto">${escapeHtml(JSON.stringify(result.result, null, 2))}</pre>
+            </div>
+        `;
+    } else {
+        resultContent.innerHTML = `
+            <div class="border border-red-200 bg-red-50 rounded-md p-4">
+                <h3 class="text-sm font-semibold text-red-900 mb-2">Error</h3>
+                <p class="text-sm text-red-800">${escapeHtml(result.error || 'Unknown error')}</p>
+                ${result.error_code ? `<p class="text-xs text-red-600 mt-1">Code: ${result.error_code}</p>` : ''}
+            </div>
+        `;
+    }
+    
+    // Scroll to results
+    resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearForm() {
+    toolForm.reset();
+}
+
+function clearResults() {
+    resultsContainer.classList.add('hidden');
+    resultContent.innerHTML = '';
+    executionMetadata.innerHTML = '';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}
+
