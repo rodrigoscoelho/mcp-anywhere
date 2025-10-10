@@ -212,8 +212,10 @@ async def execute_tool(request: Request) -> JSONResponse:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 # Prepare headers
+                # MCP requires Accept header with both application/json and text/event-stream
                 headers = {
                     "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
                 }
 
                 # Copy session cookie for authentication
