@@ -301,12 +301,68 @@ async def execute_tool(request: Request) -> JSONResponse:
                     # Check for JSON-RPC error
                     if "error" in result_data:
                         error_info = result_data["error"]
+
+                        # On invalid params, try to fetch the tool's input schema from MCP tools/list
+                        expected_schema = None
+                        if error_info.get("code") == -32602:
+                            try:
+                                list_headers = {
+                                    "Content-Type": "application/json",
+                                    "Accept": "application/json, text/event-stream",
+                                }
+                                if "session" in request.cookies:
+                                    list_headers["Cookie"] = f"session={request.cookies['session']}"
+                                if mcp_session_id:
+                                    list_headers["mcp-session-id"] = mcp_session_id
+
+                                tools_list_req = {
+                                    "jsonrpc": "2.0",
+                                    "id": str(int(time.time() * 1000)),
+                                    "method": "tools/list",
+                                    "params": {},
+                                }
+
+                                list_resp = await client.post(
+                                    mcp_url,
+                                    json=tools_list_req,
+                                    headers=list_headers,
+                                    follow_redirects=True,
+                                )
+
+                                if list_resp.status_code == 200:
+                                    list_ct = list_resp.headers.get("content-type", "")
+                                    if "text/event-stream" in list_ct:
+                                        text = list_resp.text
+                                        for line in text.split("\n"):
+                                            if line.startswith("data: "):
+                                                try:
+                                                    data_obj = json.loads(line[6:])
+                                                    break
+                                                except Exception:
+                                                    pass
+                                    else:
+                                        data_obj = list_resp.json()
+
+                                    tools = (data_obj.get("result") or {}).get("tools") or []
+                                    for t in tools:
+                                        if t.get("name") == prefixed_tool_name:
+                                            # Common field names: input_schema or schema
+                                            expected_schema = (
+                                                t.get("input_schema")
+                                                or t.get("schema")
+                                                or t.get("inputSchema")
+                                            )
+                                            break
+                            except Exception:
+                                logger.debug("Failed to fetch tools/list for schema", exc_info=True)
+
                         return JSONResponse(
                             {
                                 "success": False,
                                 "error": error_info.get("message", "Unknown error"),
                                 "error_code": error_info.get("code"),
                                 "error_data": error_info.get("data"),
+                                "expected_schema": expected_schema,
                                 "duration_ms": duration_ms,
                             }
                         )
